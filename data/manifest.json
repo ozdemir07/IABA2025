@@ -1,0 +1,8 @@
+{
+  "plans":        ["assets/plans/p001.jpg", "assets/plans/p002.jpg"],
+  "sections":     ["assets/sections/s001.jpg"],
+  "sitePlans":    ["assets/site-plans/sp001.jpg"],
+  "diagrams":     ["assets/diagrams/d001.jpg"],
+  "perspectives": ["assets/perspectives/r001.jpg"],
+  "mockups":      ["assets/mockups/m001.jpg"]
+}
