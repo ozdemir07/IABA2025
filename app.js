@@ -1,4 +1,4 @@
-// app.js — square-grid flasher + 6 image zooms + centered 6-video zoom
+// app.js — square-grid flasher + 6 image zooms + centered 6-video zoom (images via manifest)
 // TEADS | fullscreen canvas 2D
 
 // -------------------- PARAMS --------------------
@@ -27,21 +27,23 @@ const LANDSCAPE = {
 let ZOOM_COLS, ZOOM_ROWS, VIDEO_WIN_COLS, VIDEO_WIN_ROWS, VIDEO_CENTER_COLS, VIDEO_CENTER_ROWS;
 
 // Flip cadence (per-slot randomized)
-const FLASH_MIN = 220;   // ms
-const FLASH_MAX = 900;   // ms
+const FLASH_MIN = 600;   // ms
+const FLASH_MAX = 1200;   // ms
 
 // Camera choreography
-const IMAGE_DWELL_MS = 3000;   // stay time when zoomed on images
+const IMAGE_DWELL_MS = 15000;   // stay time when zoomed on images
 const VIDEO_DWELL_MS = 5000;   // stay time when zoomed on videos
-const CYCLE_GAP_MS   = 2000;   // pause in overview before next zoom
-const ZOOM_TIME_MS   = 1600;   // tween duration
+const CYCLE_GAP_MS   = 5000;   // pause in overview before next zoom
+const ZOOM_TIME_MS   = 3000;   // tween duration
 
 // Push-in factors (1=fit; >1 = tighter crop to hide margins)
 const IMAGE_ZOOM_FACTOR = 1.20;
 const VIDEO_ZOOM_FACTOR = 1.60;
 
-// Groups + debug palettes (kept)
+// Groups (names must match manifest keys; both "siteplans" and "sitePlans" are supported)
 const GROUPS = ['plans','sections','siteplans','diagrams','perspectives','mockups'];
+
+// Debug palettes (only used as temporary placeholder color while an image is still loading)
 const PAL = {
   all:          ['#1abc9c','#16a085','#27ae60','#2ecc71','#3498db','#2980b9','#9b59b6','#8e44ad','#e67e22','#d35400','#e74c3c','#c0392b'],
   plans:        ['#22a6b3','#7ed6df','#4834d4','#686de0'],
@@ -64,9 +66,67 @@ const rand = (a,b) => a + Math.random()*(b-a);
 const lerp = (a,b,t) => a + (b-a)*t;
 const ease = (t) => (t<0?0:(t>1?1:1-Math.pow(1-t,3)));   // smooth, no overshoot
 
+// Draw an image to cover a square tile (no letterboxing)
+function drawCover(img, x, y, s){
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return false;
+  const k = Math.max(s/iw, s/ih);
+  const dw = iw*k, dh = ih*k;
+  const dx = x + (s - dw)/2, dy = y + (s - dh)/2;
+  ctx.drawImage(img, dx, dy, dw, dh);
+  return true;
+}
+
 // -------------------- canvas --------------------
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d', { alpha:false });
+
+// -------------------- assets via manifest --------------------
+const MANIFEST_URL = 'data/manifest.json';
+
+// IMAGES[group] = [{img, ready:true/false}, ...]; ALL flattens all groups
+const IMAGES = { plans:[], sections:[], siteplans:[], diagrams:[], perspectives:[], mockups:[] };
+let ALL = []; // flattened
+
+async function loadManifest() {
+  const res = await fetch(MANIFEST_URL);
+  const data = await res.json(); // see manifest structure in your repo
+  // normalize "siteplans"/"sitePlans"
+  const siteplans = data.siteplans || data.sitePlans || [];
+  const map = {
+    plans: data.plans || [],
+    sections: data.sections || [],
+    siteplans,
+    diagrams: data.diagrams || [],
+    perspectives: data.perspectives || [],
+    mockups: data.mockups || []
+  };
+
+  // create <img> objects
+  Object.keys(map).forEach(group=>{
+    IMAGES[group] = map[group].map(src=>{
+      const img = new Image();
+      img.decoding = 'async';
+      img.loading = 'eager'; // we want fast flips once cached
+      img.src = src;
+      const o = { img, ready:false };
+      img.addEventListener('load', ()=> o.ready = true);
+      img.addEventListener('error', ()=> { o.ready = false; });
+      return o;
+    });
+  });
+
+  // flattened pool for "all"
+  ALL = [...IMAGES.plans, ...IMAGES.sections, ...IMAGES.siteplans,
+         ...IMAGES.diagrams, ...IMAGES.perspectives, ...IMAGES.mockups];
+}
+
+// pick a random asset object from a pool name
+function pickAssetFromPool(poolName){
+  if (poolName === 'all') return ALL.length ? pick(ALL) : null;
+  const arr = IMAGES[poolName] || [];
+  return arr.length ? pick(arr) : null;
+}
 
 // -------------------- world (persistent) --------------------
 const world = {
@@ -75,6 +135,8 @@ const world = {
   camFrom:null, camTo:null, camT0:0, camT1:0,
   state: 'overview', mode: 'image', zoomRect: null, zoomGroup: null
 };
+
+// Slot model: {gx,gy,cx,cy,w,h,pool,nextFlip, asset:{img,ready} | null, placeholderColor}
 
 // -------------------- Build tiles --------------------
 function buildWorld(){
@@ -94,10 +156,13 @@ function buildWorld(){
   for (let gy=gy0; gy<gy1; gy++){
     for (let gx=gx0; gx<gx1; gx++){
       const cx = gx*t, cy = gy*t;
+      const pool = 'all';
       world.slots.push({
         gx, gy, cx, cy, w:t, h:t,
-        color: pick(PAL.all), pool: 'all',
+        pool,
+        asset: pickAssetFromPool(pool),         // may be null until manifest loads
         nextFlip: performance.now() + rand(FLASH_MIN, FLASH_MAX),
+        placeholderColor: pick(PAL.all)
       });
     }
   }
@@ -140,6 +205,10 @@ function retargetPools(rect, poolName){
     if (s.cx >= rect.x && s.cx < rect.x+rect.w &&
         s.cy >= rect.y && s.cy < rect.y+rect.h){
       s.pool = poolName;
+      s.asset = pickAssetFromPool(poolName) || s.asset;
+      // refresh placeholder to the group's palette (nice visual hint)
+      const pal = PAL[poolName] || PAL.all;
+      s.placeholderColor = pick(pal);
     }
   }
 }
@@ -148,6 +217,8 @@ function restorePools(rect){
     if (s.cx >= rect.x && s.cx < rect.x+rect.w &&
         s.cy >= rect.y && s.cy < rect.y+rect.h){
       s.pool = 'all';
+      s.asset = pickAssetFromPool('all') || s.asset;
+      s.placeholderColor = pick(PAL.all);
     }
   }
 }
@@ -256,16 +327,23 @@ function draw(now){
   ctx.fillStyle = BG_COLOR;
   ctx.fillRect(0, 0, canvas.width/world.cam.sx, canvas.height/world.cam.sy);
 
+  // flip due slots (choose new image from the slot's current pool)
   for (const s of world.slots){
     if (now >= s.nextFlip){
-      const pal = PAL[s.pool] || PAL.all;
-      let c; do { c = pick(pal); } while (pal.length>1 && c===s.color);
-      s.color = c;
+      const asset = pickAssetFromPool(s.pool);
+      if (asset) s.asset = asset;
       s.nextFlip = now + rand(FLASH_MIN, FLASH_MAX);
+      if (!asset) {
+        // cycle placeholder color if no asset yet
+        const pal = (PAL[s.pool] || PAL.all);
+        s.placeholderColor = pick(pal);
+      }
     }
   }
 
   const t = world.tile;
+
+  // compute video center indices if needed
   let vx0=-1, vy0=-1;
   if (world.mode==='video' && world.zoomRect){
     vx0 = world.zoomRect.gx0 + Math.floor((VIDEO_WIN_COLS - VIDEO_CENTER_COLS)/2);
@@ -288,10 +366,18 @@ function draw(now){
         continue;
       }
     }
-    ctx.fillStyle = s.color;
-    ctx.fillRect(s.cx, s.cy, t, t);
+
+    // draw image (or placeholder color if still loading)
+    const asset = s.asset;
+    if (asset && asset.ready){
+      drawCover(asset.img, s.cx, s.cy, t);
+    } else {
+      ctx.fillStyle = s.placeholderColor;
+      ctx.fillRect(s.cx, s.cy, t, t);
+    }
   }
 
+  // grid lines
   ctx.globalAlpha = GRID_OPACITY;
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 1 / world.cam.sx;
@@ -330,8 +416,13 @@ function resize(){
 window.addEventListener('resize', resize);
 
 // -------------------- main --------------------
-function init(){
+async function init(){
   resize();
+  await loadManifest();   // load and start caching images
+  // populate any existing slots with assets now that pools exist
+  for (const s of world.slots){
+    s.asset = pickAssetFromPool(s.pool) || s.asset;
+  }
   phaseStart = performance.now();
   requestAnimationFrame(tick);
 }
