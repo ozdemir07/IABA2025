@@ -11,9 +11,7 @@ OUT    = pathlib.Path("data/manifest.json")
 GROUPS = {
     "plans":         "plans",
     "sections":      "sections",
-    # keep BOTH spellings in case your app expects either
     "siteplans":     "site-plans",
-    "sitePlans":     "site-plans",
     "diagrams":      "diagrams",
     "perspectives":  "perspectives",
     "mockups":       "mockups",
