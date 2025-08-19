@@ -30,10 +30,10 @@ const FLASH_MIN = 600;   // ms
 const FLASH_MAX = 1200;  // ms
 
 // Camera choreography
-const IMAGE_DWELL_MS = 2000;  // stay time when zoomed on images
-const VIDEO_DWELL_MS = 10000; // stay time when zoomed on videos
-const CYCLE_GAP_MS   = 1000;  // pause in overview before next zoom
-const ZOOM_TIME_MS   = 1000;  // tween duration
+const IMAGE_DWELL_MS = 8000;  // stay time when zoomed on images
+const VIDEO_DWELL_MS = 40000; // stay time when zoomed on videos
+const CYCLE_GAP_MS   = 5000;  // pause in overview before next zoom
+const ZOOM_TIME_MS   = 3000;  // tween duration
 
 // Push-in factors (1=fit; >1 = tighter crop to hide margins)
 const IMAGE_ZOOM_FACTOR = 1.20;
