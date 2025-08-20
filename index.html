@@ -1,16 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="tr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>TEADS — Square Grid Zoom</title>
+
+  <!-- Font: BPdotsUnicase (OTF) -->
+  <link rel="preload" href="fonts/BPdotsUnicase.otf" as="font" type="font/otf" crossorigin>
   <style>
-    html,body{margin:0;height:100%;background:#0f1113}
-    #c{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+    @font-face{
+      font-family: 'BPdotsUnicase';
+      src: url('fonts/BPdotsUnicase.otf') format('opentype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    html,body{margin:0;height:100%;background:#0f1113;overflow:hidden}
+
+    /* Main grid canvas sits under the intro overlay */
+    #c{
+      position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:1;
+    }
+
+    /* Intro overlay canvas (drawn first, then hidden by the orchestrator) */
+    #intro{
+      position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:2; pointer-events:none;
+    }
+
+    .hidden{display:none!important}
   </style>
-  <script defer src="app.js?v=square-grid-2"></script>
+
+  <!-- Load order matters: grid engine, then intro, then orchestrator -->
+  <script defer src="./app.main.js"></script>  <!-- exposes window.gridAPI + window.startMain -->
+  <script defer src="./intro.js"></script>      <!-- exposes window.runIntro -->
+  <script defer src="./app.js"></script>        <!-- orchestrates intro -> main -->
 </head>
 <body>
+  <!-- Intro overlay (draw/fade typing here) -->
+  <canvas id="intro"></canvas>
+  <!-- Main grid engine -->
   <canvas id="c"></canvas>
 </body>
 </html>
