@@ -11,7 +11,7 @@
     gridFadeStart: 0.10,        // FRACTION of total intro duration when grid starts fading in (0..1)
     gridFadeMs: 2500,           // grid fade duration
     textFadeOutMs: 2500,        // text fade out duration
-    minTypingHoldMs: 1000,       // small hold after last char before fading text
+    minTypingHoldMs: 1000,      // small hold after last char before fading text
 
     // --- grid look ---
     gridOpacity: 0.18,          // final grid opacity (multiplied by fade progress)
@@ -27,18 +27,41 @@
     // OPTIONAL: per‑row absolute font size in px (one entry per title line).
     // If provided, overrides textScale for that row.
     // Example: [28, 22, 22, 22]
-    fontPxByRow: [24, 32, 18, 18], //null if no override
+    fontPxByRow: [32, 36, 24, 24], // null if no override
 
     // --- content & layout ---
     titleLines: [
-      'Antalya Bilim Üniversitesi',
+      'Antalya Bilim University',
       '10+',
-      'Temsillerin Ontolojisi',
-      'Bilginin Ortaklaşa İnşası'
+      'Ontology of Representations; Co-construction of Knowledge',
+      'Temsillerin Ontolojisi; Bilginin Ortaklaşa İnşası'
     ],
     padTilesLeft: 1,            // left padding in tiles
     padTilesTop: 1,             // top padding in tiles
-    lineGapTiles: 1             // vertical gap between rows (in tiles)
+    lineGapTiles: 1,            // vertical gap between rows (in tiles)
+
+    // ====== NEW: bilingual warnings (fonts + timings) ======
+    warnFadeInMs: 1200,
+    warnHoldMs: 3000,
+    warnFadeOutMs: 1200,
+    warnGapMs: 600, // blank time after each language block
+
+    // Satoshi fonts (titles/body)
+    warnFonts: {
+      title: { family: 'SatoshiBlack',  url: 'fonts/Satoshi-Black.otf'  },
+      body:  { family: 'SatoshiMedium', url: 'fonts/Satoshi-Medium.otf' }
+    },
+    // Warning text (TR then EN)
+    warningsTR: [
+      'UYARI',
+      'Bu video, ışığa duyarlı epilepsi hastalarında nöbetlere neden olabilir.',
+      'İzleyicinin dikkatine sunulur.'
+    ],
+    warningsEN: [
+      'WARNING',
+      'This video may potentially trigger seizures for people with photosensitive epilepsy.',
+      'Viewer discretion is advised.'
+    ]
   };
 
   const clamp01 = x => Math.max(0, Math.min(1, x));
@@ -96,6 +119,23 @@
     return out;
   }
 
+  // ---- NEW: draw a centered warning block with Satoshi fonts ----
+  function drawWarningBlock(ctx, cx, cy, basePx, lines, fonts) {
+    const gapPx = Math.floor(basePx * 0.6);
+    const totalH = lines.length * basePx + (lines.length - 1) * gapPx;
+    let y = cy - totalH / 2 + basePx / 2;
+
+    lines.forEach((ln, i) => {
+      const fam = (i === 0 ? fonts.title.family : fonts.body.family);
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${basePx}px "${fam}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+      ctx.fillText(ln, cx, y);
+      y += basePx + gapPx;
+    });
+  }
+
   window.runIntro = async function runIntro(opts = {}) {
     const p = { ...DEFAULTS, ...opts };
 
@@ -104,9 +144,14 @@
     const ctx = c.getContext('2d', { alpha: false });
     c.width = window.innerWidth; c.height = window.innerHeight;
 
-    await loadFont(p.fontURL, p.fontFamily);
+    // load fonts (existing title font + Satoshi for warnings)
+    await Promise.all([
+      loadFont(p.fontURL, p.fontFamily),
+      loadFont(p.warnFonts.title.url, p.warnFonts.title.family),
+      loadFont(p.warnFonts.body.url,  p.warnFonts.body.family)
+    ]);
 
-    const bg = getComputedStyle(document.body).backgroundColor || '#000000';
+    const bg = '#000000';
     const { tile, cols, rows } = computeTile();
     const GRID = makeGridPath(tile, cols, rows);
 
@@ -125,7 +170,7 @@
     const total = typingTotal + p.minTypingHoldMs + p.textFadeOutMs;
 
     const gridStart = p.gridFadeStart * total;   // when grid starts appearing
-    const gridEnd   = gridStart + p.gridFadeMs;
+    const gridEnd   = gridStart + p.gridFadeMs;  // (kept to preserve your original vars)
 
     // Optional per-row font size (px). Fallback to tile * textScale if not provided.
     let fontPxForRow = null;
@@ -139,6 +184,10 @@
       fontPxForRow = () => base;
     }
 
+    // ---- NEW: total warning time (TR + EN), each with fade in/hold/fade out + gap ----
+    const perBlock = p.warnFadeInMs + p.warnHoldMs + p.warnFadeOutMs + p.warnGapMs;
+    const warnTotal = perBlock * 2;
+
     let revealed = 0; // how many characters revealed
 
     const t0 = performance.now();
@@ -151,13 +200,45 @@
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, c.width, c.height);
 
+        // ---- warnings phase first ----
+        if (tMs < warnTotal) {
+          const half = perBlock;
+          const local = tMs < half ? tMs : (tMs - half);
+          const block = tMs < half ? p.warningsEN : p.warningsTR;
+
+          let alpha = 0;
+          if (local < p.warnFadeInMs) {
+            alpha = clamp01(local / p.warnFadeInMs);
+          } else if (local < p.warnFadeInMs + p.warnHoldMs) {
+            alpha = 1;
+          } else if (local < p.warnFadeInMs + p.warnHoldMs + p.warnFadeOutMs) {
+            const t = (local - (p.warnFadeInMs + p.warnHoldMs)) / Math.max(1, p.warnFadeOutMs);
+            alpha = clamp01(1 - t);
+          } else {
+            alpha = 0; // gap time
+          }
+
+          if (alpha > 0) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            drawWarningBlock(ctx, c.width / 2, c.height / 2, Math.floor(tile * 0.9), block, p.warnFonts);
+            ctx.restore();
+          }
+
+          requestAnimationFrame(loop);
+          return;
+        }
+
+        // ---- normal intro after warnings (time-shifted by warnTotal) ----
+        const tIntro = tMs - warnTotal;
+
         // reveal count
-        while (revealed < schedule.length && tMs >= schedule[revealed].t) revealed++;
+        while (revealed < schedule.length && tIntro >= schedule[revealed].t) revealed++;
 
         // grid fade
         let gAlpha = 0;
-        if (tMs >= gridStart) {
-          const k = clamp01((tMs - gridStart) / Math.max(1, p.gridFadeMs));
+        if (tIntro >= gridStart) {
+          const k = clamp01((tIntro - gridStart) / Math.max(1, p.gridFadeMs));
           gAlpha = k * p.gridOpacity;
         }
         if (gAlpha > 0) {
@@ -171,8 +252,8 @@
 
         // text fade out after typing completes + hold
         let txtAlpha = 1;
-        if (tMs > typingTotal + p.minTypingHoldMs) {
-          const tt = (tMs - (typingTotal + p.minTypingHoldMs)) / Math.max(1, p.textFadeOutMs);
+        if (tIntro > typingTotal + p.minTypingHoldMs) {
+          const tt = (tIntro - (typingTotal + p.minTypingHoldMs)) / Math.max(1, p.textFadeOutMs);
           txtAlpha = clamp01(1 - tt);
         }
 
@@ -200,7 +281,7 @@
           ctx.restore();
         }
 
-        if (tMs < total) {
+        if (tIntro < total) {
           requestAnimationFrame(loop);
         } else {
           resolve();

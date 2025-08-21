@@ -5,9 +5,22 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>TEADS — Square Grid Zoom</title>
 
-  <!-- Font: BPdotsUnicase (OTF) -->
+  <!-- Preload fonts (OTF) -->
   <link rel="preload" href="fonts/BPdotsUnicase.otf" as="font" type="font/otf" crossorigin>
+  <link rel="preload" href="fonts/Satoshi-Black.otf"   as="font" type="font/otf" crossorigin>
+  <link rel="preload" href="fonts/Satoshi-Medium.otf"  as="font" type="font/otf" crossorigin>
+
   <style>
+    /* App-wide color baseline: TRUE black */
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #000; /* ensure full black for intro + grid */
+      overflow: hidden;
+    }
+
+    /* Font faces */
     @font-face{
       font-family: 'BPdotsUnicase';
       src: url('fonts/BPdotsUnicase.otf') format('opentype');
@@ -15,29 +28,52 @@
       font-style: normal;
       font-display: swap;
     }
+    @font-face{
+      font-family: 'SatoshiBlack';
+      src: url('fonts/Satoshi-Black.otf') format('opentype');
+      font-weight: 800;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face{
+      font-family: 'SatoshiMedium';
+      src: url('fonts/Satoshi-Medium.otf') format('opentype');
+      font-weight: 500;
+      font-style: normal;
+      font-display: swap;
+    }
 
-    html,body{margin:0;height:100%;background:#0f1113;overflow:hidden}
-
-    /* Main grid canvas sits under the intro overlay */
+    /* Main grid canvas sits below the intro overlay */
     #c{
-      position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:1;
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      z-index: 1;
     }
 
-    /* Intro overlay canvas (drawn first, then hidden by the orchestrator) */
+    /* Intro overlay canvas (warnings + typing), drawn first */
     #intro{
-      position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:2; pointer-events:none;
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      z-index: 2;
+      pointer-events: none;
     }
 
-    .hidden{display:none!important}
+    .hidden{ display: none !important; }
   </style>
 
-  <!-- Load order matters: grid engine, then intro, then orchestrator -->
+  <!-- Load order: grid engine -> intro -> orchestrator -->
   <script defer src="./app.main.js"></script>  <!-- exposes window.gridAPI + window.startMain -->
-  <script defer src="./intro.js"></script>      <!-- exposes window.runIntro -->
+  <script defer src="./intro.js"></script>      <!-- exposes window.runIntro (warnings + typing) -->
   <script defer src="./app.js"></script>        <!-- orchestrates intro -> main -->
 </head>
 <body>
-  <!-- Intro overlay (draw/fade typing here) -->
+  <!-- Intro overlay (warnings + title typing) -->
   <canvas id="intro"></canvas>
   <!-- Main grid engine -->
   <canvas id="c"></canvas>

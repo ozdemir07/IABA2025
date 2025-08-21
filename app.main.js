@@ -33,10 +33,9 @@ const FLASH_MIN = 600;
 const FLASH_MAX = 1200;
 
 // Camera choreography
-const IMAGE_DWELL_MS = 10000;
-const VIDEO_DWELL_MS = 60000;
-const CYCLE_GAP_MS   = 10000;
-const ZOOM_TIME_MS   = 4000;
+const IMAGE_DWELL_MS = 15000;   // (kept) image zooms still cycle by dwell
+const CYCLE_GAP_MS   = 15000;
+const ZOOM_TIME_MS   = 0;
 
 // Push-in factors
 const IMAGE_ZOOM_FACTOR = 1.20;
@@ -63,7 +62,7 @@ const VIDEO_MANIFEST_URL = 'data/videos.json';
 const IMAGES = { plans:[], sections:[], siteplans:[], diagrams:[], perspectives:[], mockups:[] };
 let ALL = []; // flattened
 
-// placeholders OFF by default (you asked to get rid of them)
+// placeholders OFF by default
 let SHOW_PLACEHOLDERS = false;
 
 // grayscale palette (used only if SHOW_PLACEHOLDERS = true)
@@ -78,14 +77,29 @@ const PAL = {
 };
 
 // -------------------- progressive reveal (overlay) --------------------
-// A lightweight “mid-sequence”: at the very start, paint BG-colored squares
-// over every tile, then remove them randomly for REVEAL_DURATION_MS to
-// give the effect of the grid being populated by images.
-const REVEAL_ENABLED       = true;     // set false to skip this overlay
-const REVEAL_DURATION_MS   = 2000;     // total reveal time
-const REVEAL_BATCH_MIN     = 40;       // min tiles revealed per frame
-const REVEAL_BATCH_MAX     = 120;      // max tiles revealed per frame
-const REVEAL_EASE_STRENGTH = 0.8;      // 0..1 — higher = faster finish
+// At the very start, paint BG-colored squares over every tile, then remove
+// them randomly for REVEAL_DURATION_MS to give "grid populating" effect.
+const REVEAL_ENABLED       = true;
+const REVEAL_DURATION_MS   = 5000;
+const REVEAL_BATCH_MIN     = 10;
+const REVEAL_BATCH_MAX     = 50;
+const REVEAL_EASE_STRENGTH = 0.8; // 0..1 — higher = faster finish
+
+// -------------------- OUTRO (video ending takes over) --------------------
+// Triggered after entering 6‑video zoom.
+// 1) Fade in UNDERLAY (BG) that hides images+grid but sits UNDER videos
+// 2) After OUTRO_DRIFT_DELAY_MS, videos drift outward & scale up for OUTRO_DRIFT_MS
+// 3) After OUTRO_VIDEO_FADE_DELAY_MS, fade in OVERLAY (BG) on top of videos
+//    to fully fade to background.
+// Once videos are fully faded, we stop the RAF to save resources.
+const OUTRO_START_DELAY_MS        = 100;    // small delay after video-zoom begins
+const OUTRO_FADE_IMAGES_MS        = 1500;   // UNDERLAY fade time (images+grid disappear)
+const OUTRO_DRIFT_DELAY_MS        = 500;    // wait before videos start drifting
+const OUTRO_DRIFT_MS              = 10000;  // drift (and scale) duration
+const OUTRO_DRIFT_DISTANCE_TILES  = 0.2;    // drift distance (in tile units)
+const OUTRO_DRIFT_SCALE           = 1.15;   // max scale during drift
+const OUTRO_VIDEO_FADE_DELAY_MS   = 87000;  // wait before fading the videos
+const OUTRO_FADE_VIDEOS_MS        = 3000;   // OVERLAY fade time (videos disappear)
 
 // -------------------- assets: images --------------------
 async function loadImagesManifest() {
@@ -137,15 +151,27 @@ function pickAssetFromPool(poolName){
 // -------------------- world --------------------
 const world = {
   tile: 0, cols: 0, rows: 0, bleed: 1, slots: [],
+
   cam: { sx:1, sy:1, tx:0, ty:0 },
   camFrom:null, camTo:null, camT0:0, camT1:0,
+
   state: 'overview', mode: 'image', zoomRect: null, zoomGroup: null,
   phaseStart: 0, seqIndex: 0,
 
   // reveal overlay
   revealActive: false,
   revealStart: 0,
-  coverSet: null // Set of covered tile indices (gx,gy → idx)
+  coverSet: null, // Set of covered tile indices (gx,gy → idx)
+
+  // outro
+  outro: {
+    active: false,
+    t0: 0,                // start timestamp (after OUTRO_START_DELAY_MS has elapsed)
+    startRequest: 0,      // when we decided to start (we'll wait OUTRO_START_DELAY_MS)
+    underAlpha: 0,        // images+grid fade alpha (via underlay)
+    overAlpha: 0,         // videos fade alpha (via overlay)
+    base: [],             // 6 entries: {x,y,size, dirX,dirY} in TILE SPACE
+  }
 };
 
 // Slot model: {gx,gy,cx,cy,w,h,pool,nextFlip,asset:{img,ready}|null,placeholderColor}
@@ -316,8 +342,11 @@ function drawVidPlaceholder(x,y,s){
 
 // -------------------- cycle --------------------
 function cycle(now){
+  // pause normal cycle entirely during outro
+  if (world.outro.active) return;
+
+  // During reveal, we still draw (images under overlay). When done, fall through to overview.
   if (world.revealActive){
-    // During reveal, we still draw (images under overlay). When done, fall through to overview.
     return;
   }
 
@@ -341,14 +370,68 @@ function cycle(now){
       world.phaseStart = now;
     }
   } else if (world.state === 'zoom'){
-    const dwell = (world.mode==='video') ? VIDEO_DWELL_MS : IMAGE_DWELL_MS;
-    if (now - world.phaseStart > dwell){
-      if (world.zoomGroup) restorePools(world.zoomRect);
-      startZoomOut();
-      world.phaseStart = now;
-      world.seqIndex = (world.seqIndex + 1) % (GROUPS.length + 1);
+    if (world.mode === 'image'){
+      // images still auto-cycle by dwell
+      if (now - world.phaseStart > IMAGE_DWELL_MS){
+        if (world.zoomGroup) restorePools(world.zoomRect);
+        startZoomOut();
+        world.phaseStart = now;
+        world.seqIndex = (world.seqIndex + 1) % (GROUPS.length + 1);
+      }
+    } else if (world.mode === 'video'){
+      // video: DO NOT auto-zoom-out. Let the outro take over.
+      if (!world.outro.active && !world.outro.startRequest){
+        world.outro.startRequest = now; // mark request time
+      }
+      // (no dwell exit for video)
     }
   }
+}
+
+// -------------------- OUTRO control --------------------
+function startOutro(now){
+  // Build base positions for the 2x3 video cluster in TILE space (from the current zoomRect)
+  const t = world.tile;
+  const vz = world.zoomRect;
+  if (!vz) return;
+
+  const vx0 = vz.gx0 + Math.floor((VIDEO_WIN_COLS - VIDEO_CENTER_COLS)/2);
+  const vy0 = vz.gy0 + Math.floor((VIDEO_WIN_ROWS - VIDEO_CENTER_ROWS)/2);
+  const cx = (vx0 + VIDEO_CENTER_COLS/2) * t;
+  const cy = (vy0 + VIDEO_CENTER_ROWS/2) * t;
+
+  const base = [];
+  for (let row=0; row<VIDEO_CENTER_ROWS; row++){
+    for (let col=0; col<VIDEO_CENTER_COLS; col++){
+      const gx = vx0 + col;
+      const gy = vy0 + row;
+      const x = gx * t;
+      const y = gy * t;
+      const mx = x + t*0.5 - cx;
+      const my = y + t*0.5 - cy;
+      const len = Math.max(1e-6, Math.hypot(mx,my));
+      base.push({ x, y, size:t, dirX: mx/len, dirY: my/len });
+    }
+  }
+
+  world.outro.base = base;
+  world.outro.t0 = now;
+  world.outro.active = true;
+}
+
+function maybeKickOutro(now){
+  if (world.mode !== 'video') return;
+  if (!world.outro.startRequest || world.outro.active) return;
+  if (now - world.outro.startRequest >= OUTRO_START_DELAY_MS){
+    startOutro(now);
+  }
+}
+
+function outroFinished(now){
+  if (!world.outro.active) return false;
+  const elapsed = now - world.outro.t0;
+  // Finished when videos fully faded
+  return (elapsed >= OUTRO_VIDEO_FADE_DELAY_MS + OUTRO_FADE_VIDEOS_MS);
 }
 
 // -------------------- draw --------------------
@@ -358,48 +441,43 @@ function draw(now){
   ctx.fillStyle = BG_COLOR;
   ctx.fillRect(0, 0, canvas.width/world.cam.sx, canvas.height/world.cam.sy);
 
-  // flip due slots
-  for (const s of world.slots){
-    if (now >= s.nextFlip){
-      const asset = pickAssetFromPool(s.pool);
-      if (asset) s.asset = asset;
-      s.nextFlip = now + rand(FLASH_MIN, FLASH_MAX);
-      if (!asset && SHOW_PLACEHOLDERS) {
-        s.placeholderColor = pick(PAL[s.pool] || PAL.all);
+  // flip due slots (we can keep flips; during outro they’ll be hidden by underlay)
+  if (!world.outro.active){
+    for (const s of world.slots){
+      if (now >= s.nextFlip){
+        const asset = pickAssetFromPool(s.pool);
+        if (asset) s.asset = asset;
+        s.nextFlip = now + rand(FLASH_MIN, FLASH_MAX);
+        if (!asset && SHOW_PLACEHOLDERS) {
+          s.placeholderColor = pick(PAL[s.pool] || PAL.all);
+        }
       }
     }
   }
 
   const t = world.tile;
 
-  // video center indices
+  // video center indices for live video region
   let vx0=-1, vy0=-1;
-  if (world.mode==='video' && world.zoomRect){
+  if (world.zoomRect){
     vx0 = world.zoomRect.gx0 + Math.floor((VIDEO_WIN_COLS - VIDEO_CENTER_COLS)/2);
     vy0 = world.zoomRect.gy0 + Math.floor((VIDEO_WIN_ROWS - VIDEO_CENTER_ROWS)/2);
   }
 
-  // Base layer: images or placeholders
+  // --- LAYER 1: draw images/placeholders, but SKIP center video tiles ---
   for (const s of world.slots){
-    const inRect = world.zoomRect &&
-                   s.cx >= world.zoomRect.x && s.cx < world.zoomRect.x + world.zoomRect.w &&
-                   s.cy >= world.zoomRect.y && s.cy < world.zoomRect.y + world.zoomRect.h;
-
-    if (inRect && world.mode==='video'){
+    let isCenterVideoTile = false;
+    if (world.mode==='video' && world.zoomRect){
       const gx = s.gx, gy = s.gy;
-      const inCenter = gx >= vx0 && gx < vx0 + VIDEO_CENTER_COLS &&
-                       gy >= vy0 && gy < vy0 + VIDEO_CENTER_ROWS;
-      if (inCenter){
-        const col = gx - vx0, row = gy - vy0;
-        const idx = row * VIDEO_CENTER_COLS + col; // 0..5
-        drawVideoInTile(videos[idx] || {el:{},ready:false}, s.cx, s.cy, t);
-        continue;
-      }
+      isCenterVideoTile = (gx >= vx0 && gx < vx0 + VIDEO_CENTER_COLS &&
+                           gy >= vy0 && gy < vy0 + VIDEO_CENTER_ROWS);
+    }
+    if (isCenterVideoTile){
+      continue; // videos will render here
     }
 
     const a = s.asset;
     if (a && a.ready){
-      // draw cover
       const iw = a.img.naturalWidth || a.img.width;
       const ih = a.img.naturalHeight || a.img.height;
       if (iw && ih){
@@ -425,17 +503,83 @@ function draw(now){
     }
   }
 
-  // grid lines
-  ctx.globalAlpha = GRID_OPACITY;
-  ctx.strokeStyle = '#c8cacc';
-  ctx.lineWidth = 1 / world.cam.sx;
-  ctx.beginPath();
-  const gx0 = (-world.bleed) * t, gx1 = (world.cols + world.bleed) * t;
-  const gy0 = (-world.bleed) * t, gy1 = (world.rows + world.bleed) * t;
-  for (let x=gx0; x<=gx1; x+=t){ ctx.moveTo(x, gy0); ctx.lineTo(x, gy1); }
-  for (let y=gy0; y<=gy1; y+=t){ ctx.moveTo(gx0, y); ctx.lineTo(gx1, y); }
-  ctx.stroke();
-  ctx.globalAlpha = 1;
+  // --- Images+Grid UNDERLAY fade (during outro) ---
+  if (world.outro.active){
+    const tImg = Math.min(1, OUTRO_FADE_IMAGES_MS > 0 ? (now - world.outro.t0) / OUTRO_FADE_IMAGES_MS : 1);
+    world.outro.underAlpha = Math.max(0, Math.min(1, tImg));
+    if (world.outro.underAlpha > 0){
+      ctx.save();
+      ctx.globalAlpha = world.outro.underAlpha;
+      ctx.fillStyle = BG_COLOR;
+      ctx.fillRect(-10000, -10000, 20000, 20000); // generous world cover
+      ctx.restore();
+    }
+  }
+
+  // --- LAYER 2: draw the 6 videos (either static tiles or drifting in outro) ---
+  if (world.mode==='video' && world.zoomRect){
+    const basePositions = [];
+    if (world.outro.active && world.outro.base.length === 6){
+      const elapsed = now - world.outro.t0;
+      const driftElapsed = Math.max(0, elapsed - OUTRO_DRIFT_DELAY_MS);
+      const driftT = OUTRO_DRIFT_MS > 0 ? Math.min(1, driftElapsed / OUTRO_DRIFT_MS) : 1;
+      const eased = ease(driftT);
+      const dist = OUTRO_DRIFT_DISTANCE_TILES * world.tile * eased;
+      const scale = lerp(1, OUTRO_DRIFT_SCALE, eased);
+
+      for (let i=0;i<6;i++){
+        const b = world.outro.base[i];
+        const x = b.x + b.dirX * dist;
+        const y = b.y + b.dirY * dist;
+        const s = b.size * scale;
+        basePositions.push({ x, y, s });
+      }
+    } else {
+      for (let row=0; row<VIDEO_CENTER_ROWS; row++){
+        for (let col=0; col<VIDEO_CENTER_COLS; col++){
+          const gx = vx0 + col;
+          const gy = vy0 + row;
+          basePositions.push({ x: gx*world.tile, y: gy*world.tile, s: world.tile });
+        }
+      }
+    }
+
+    for (let i=0;i<6;i++){
+      const p = basePositions[i];
+      if (!p) continue;
+      drawVideoInTile(videos[i] || {el:{},ready:false}, p.x, p.y, p.s);
+    }
+  }
+
+  // --- Grid lines (skip if outro underlay is fully opaque) ---
+  if (!(world.outro.active && world.outro.underAlpha >= 1)){
+    ctx.globalAlpha = GRID_OPACITY * (world.outro.active ? (1 - world.outro.underAlpha) : 1);
+    ctx.strokeStyle = '#c8cacc';
+    ctx.lineWidth = 1 / world.cam.sx;
+    ctx.beginPath();
+    const gx0 = (-world.bleed) * t, gx1 = (world.cols + world.bleed) * t;
+    const gy0 = (-world.bleed) * t, gy1 = (world.rows + world.bleed) * t;
+    for (let x=gx0; x<=gx1; x+=t){ ctx.moveTo(x, gy0); ctx.lineTo(x, gy1); }
+    for (let y=gy0; y<=gy1; y+=t){ ctx.moveTo(gx0, y); ctx.lineTo(gx1, y); }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Videos OVERLAY fade (during outro) ---
+  if (world.outro.active){
+    const elapsed = now - world.outro.t0;
+    const ovElapsed = Math.max(0, elapsed - OUTRO_VIDEO_FADE_DELAY_MS);
+    const tVid = Math.min(1, OUTRO_FADE_VIDEOS_MS > 0 ? ovElapsed / OUTRO_FADE_VIDEOS_MS : 1);
+    world.outro.overAlpha = Math.max(0, Math.min(1, tVid));
+    if (world.outro.overAlpha > 0){
+      ctx.save();
+      ctx.globalAlpha = world.outro.overAlpha;
+      ctx.fillStyle = BG_COLOR;
+      ctx.fillRect(-10000, -10000, 20000, 20000);
+      ctx.restore();
+    }
+  }
+
   ctx.restore();
 }
 
@@ -465,6 +609,8 @@ window.addEventListener('resize', resize);
 
 // -------------------- main loop --------------------
 let _rafId = 0;
+let _coverInitialCount = 0;
+
 function tick(now){
   stepCamera(now);
 
@@ -474,15 +620,10 @@ function tick(now){
     const dur = Math.max(1, REVEAL_DURATION_MS);
     const prog = Math.min(1, elapsed / dur);
     const eased = 1 - Math.pow(1 - prog, 1 + REVEAL_EASE_STRENGTH*3); // front-loaded reveal
-    // target remaining tiles as function of eased progress
     const targetLeft = Math.floor((1 - eased) * _coverInitialCount);
     const needRemove = Math.max(0, world.coverSet.size - targetLeft);
     if (needRemove > 0){
-      const batch = Math.min(
-        needRemove,
-        Math.floor(rand(REVEAL_BATCH_MIN, REVEAL_BATCH_MAX))
-      );
-      // Remove 'batch' random entries from the set
+      const batch = Math.min(needRemove, Math.floor(rand(REVEAL_BATCH_MIN, REVEAL_BATCH_MAX)));
       const arr = Array.from(world.coverSet);
       for (let i=0;i<batch && arr.length;i++){
         const k = (Math.random()*arr.length)|0;
@@ -497,17 +638,26 @@ function tick(now){
     }
   }
 
+  // If we’re in video zoom, maybe kick the outro
+  maybeKickOutro(now);
+
   cycle(now);
   draw(now);
+
+  // Stop when outro fully finished
+  if (outroFinished(now)){
+    cancelAnimationFrame(_rafId);
+    _rafId = 0;
+    return;
+  }
+
   _rafId = requestAnimationFrame(tick);
 }
 
 // -------------------- prepare & start (public) --------------------
 let _prepared = false;
-let _coverInitialCount = 0;
 
 async function prepare(){
-  // idempotent
   if (_prepared) return;
 
   resize();                 // build grid to current viewport
