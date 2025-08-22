@@ -40,9 +40,9 @@
 
     // ---------- Dual-language WARNING (new combined screen) ----------
     showWarning: true,
-    // Fonts for warning (as requested)
-    warnTitleBlackURL:   'fonts/Satoshi-Black.otf',   // "WARNING" / "UYARI"
-    warnBodyMediumURL:   'fonts/Satoshi-Light.otf',  // body paragraphs
+    // Fonts for warning
+    warnTitleBlackURL:   'fonts/Satoshi-Black.otf',  // "WARNING" / "UYARI"
+    warnBodyMediumURL:   'fonts/Satoshi-Light.otf',  // body paragraphs (you asked for Medium/Light look)
     warnTitleBlackFamily:'SatoshiBlack',
     warnBodyMediumFamily:'SatoshiLight',
 
@@ -79,7 +79,13 @@
     // Colors
     bg: '#000000',
     fg: '#ffffff',
-    gridColor: '#c8cacc' // stroke color for grid
+    gridColor: '#c8cacc', // stroke color for grid
+
+    // --- click SFX for typing (new) ---
+    clickEnabled: true,
+    clickURL: 'media/digital-click.mp3',
+    clickForRows: [0, 1, 2, 3],   // play clicks for rows 0 ("Antalya Bilim University") and 1 ("10+")
+    clickVolume: 0.6        // 0..1
   };
 
   const clamp01 = x => Math.max(0, Math.min(1, x));
@@ -100,6 +106,44 @@
     } catch (e) {
       // Non-fatal: the browser will use a fallback font
       console.warn('[intro] font load failed, using fallback:', e);
+    }
+  }
+
+  // Low-latency click player using Web Audio (graceful fallback if blocked)
+  async function makeClickPlayer(url, volume=0.6) {
+    if (!url) return null;
+    try{
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      const ctx = new AC();
+      const res = await fetch(url, {cache:'force-cache'});
+      const buf = await res.arrayBuffer();
+      const audioBuf = await ctx.decodeAudioData(buf);
+      const gain = ctx.createGain();
+      gain.gain.value = volume;
+      gain.connect(ctx.destination);
+
+      // Attempt to unlock on first user gesture (for autoplay policies)
+      const unlock = () => {
+        if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+        window.removeEventListener('pointerdown', unlock);
+        window.removeEventListener('touchstart', unlock);
+      };
+      window.addEventListener('pointerdown', unlock, { once:true });
+      window.addEventListener('touchstart', unlock, { once:true });
+
+      return function play(){
+        try{
+          // resume if suspended (may be blocked before first gesture)
+          if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+          const src = ctx.createBufferSource();
+          src.buffer = audioBuf;
+          src.connect(gain);
+          src.start(0);
+        }catch{}
+      };
+    }catch{
+      return null;
     }
   }
 
@@ -323,6 +367,10 @@
       fontPxForRow = () => base;
     }
 
+    // Prepare click player (if enabled)
+    const clickRows = Array.isArray(p.clickForRows) ? p.clickForRows : [];
+    const playClick = p.clickEnabled ? (await makeClickPlayer(p.clickURL, p.clickVolume)) : null;
+
     let revealed = 0; // how many characters revealed
 
     const t0 = performance.now();
@@ -335,8 +383,15 @@
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, c.width, c.height);
 
-        // reveal count
-        while (revealed < schedule.length && tMs >= schedule[revealed].t) revealed++;
+        // reveal count + per-char click SFX (only for selected rows)
+        while (revealed < schedule.length && tMs >= schedule[revealed].t) {
+          const item = schedule[revealed];
+          if (playClick && clickRows.indexOf(item.li) !== -1 && item.ch.trim() !== '') {
+            // Play one click per visible non-space char on rows 0/1
+            playClick();
+          }
+          revealed++;
+        }
 
         // grid fade
         let gAlpha = 0;

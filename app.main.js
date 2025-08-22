@@ -35,8 +35,8 @@ const FLASH_MIN = 600;
 const FLASH_MAX = 1200;
 
 // Camera choreography
-const IMAGE_DWELL_MS = 10000;   // (kept) image zooms still cycle by dwell
-const CYCLE_GAP_MS   = 5000;
+const IMAGE_DWELL_MS = 9000;   // (kept) image zooms still cycle by dwell
+const CYCLE_GAP_MS   = 6000;
 const ZOOM_TIME_MS   = 0;
 
 // Push-in factors
@@ -82,7 +82,7 @@ const PAL = {
 // At the very start, paint BG-colored squares over every tile, then remove
 // them randomly for REVEAL_DURATION_MS to give "grid populating" effect.
 const REVEAL_ENABLED       = true;
-const REVEAL_DURATION_MS   = 5000;
+const REVEAL_DURATION_MS   = 6000;
 const REVEAL_BATCH_MIN     = 10;
 const REVEAL_BATCH_MAX     = 50;
 const REVEAL_EASE_STRENGTH = 0.8; // 0..1 — higher = faster finish
@@ -95,7 +95,7 @@ const OUTRO_DRIFT_DELAY_MS        = 500;    // wait before videos start drifting
 const OUTRO_DRIFT_MS              = 10000;  // drift (and scale) duration
 const OUTRO_DRIFT_DISTANCE_TILES  = 0.2;    // drift distance (in tile units)
 const OUTRO_DRIFT_SCALE           = 1.15;   // max scale during drift
-const OUTRO_VIDEO_FADE_DELAY_MS   = 7000;   // wait before fading the videos
+const OUTRO_VIDEO_FADE_DELAY_MS   = 69000;   // wait before fading the videos
 const OUTRO_FADE_VIDEOS_MS        = 3000;   // OVERLAY fade time (videos disappear)
 
 // -------------------- assets: images --------------------
