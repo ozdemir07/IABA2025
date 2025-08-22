@@ -28,7 +28,7 @@
 
     // Timing (ms)
     line1FadeInMs:  1500,
-    line2DelayMs:   2000,   // start line2 after this delay (while line1 is visible)
+    line2DelayMs:   1500,   // start line2 after this delay (while line1 is visible)
     line2FadeInMs:  1500,
     holdBothMs:     1000,  // keep both lines on screen before fading them
     linesFadeOutMs: 1000,   // fade out both lines while logo fades in
