@@ -3,12 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>TEADS — Square Grid Zoom</title>
+  <title>Intersubjectivity — Öznelerarasılık</title>
+ <!-- add icon link -->
+  <link rel="icon" href="assets/teads-logo.ico"
+    type="image/x-icon" />  
 
   <!-- Preload fonts (OTF) -->
   <link rel="preload" href="fonts/BPdotsUnicase.otf" as="font" type="font/otf" crossorigin>
   <link rel="preload" href="fonts/Satoshi-Black.otf"   as="font" type="font/otf" crossorigin>
   <link rel="preload" href="fonts/Satoshi-Medium.otf"  as="font" type="font/otf" crossorigin>
+  <link rel="preload" href="fonts/Satoshi-Light.otf"   as="font" type="font/otf" crossorigin> <!-- add this -->
 
   <style>
     /* App-wide color baseline: TRUE black */
@@ -16,7 +20,7 @@
     html, body {
       margin: 0;
       height: 100%;
-      background: #000; /* ensure full black for intro + grid */
+      background: #000; /* keep pure black for intro + grid */
       overflow: hidden;
     }
 
@@ -31,7 +35,7 @@
     @font-face{
       font-family: 'SatoshiBlack';
       src: url('fonts/Satoshi-Black.otf') format('opentype');
-      font-weight: 800;
+      font-weight: 900; /* Satoshi Black is typically 900 (ok if your file maps to 800) */
       font-style: normal;
       font-display: swap;
     }
@@ -39,6 +43,13 @@
       font-family: 'SatoshiMedium';
       src: url('fonts/Satoshi-Medium.otf') format('opentype');
       font-weight: 500;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face{
+      font-family: 'SatoshiLight';
+      src: url('fonts/Satoshi-Light.otf') format('opentype');
+      font-weight: 300; /* Light is 300 */
       font-style: normal;
       font-display: swap;
     }
@@ -67,10 +78,16 @@
     .hidden{ display: none !important; }
   </style>
 
+  <script>
+  window.APP_LOOP = true;  // enable looping from intro → main → ending → intro again
+  </script>
+
   <!-- Load order: grid engine -> intro -> orchestrator -->
   <script defer src="./app.main.js"></script>  <!-- exposes window.gridAPI + window.startMain -->
   <script defer src="./intro.js"></script>      <!-- exposes window.runIntro (warnings + typing) -->
+  <script defer src="./ending.js"></script>  
   <script defer src="./app.js"></script>        <!-- orchestrates intro -> main -->
+
 </head>
 <body>
   <!-- Intro overlay (warnings + title typing) -->

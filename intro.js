@@ -1,4 +1,4 @@
-// intro.js — tile‑aligned typing + grid fade + fade‑out (minimal changes)
+// intro.js — tile‑aligned typing + grid fade + fade‑out (+ dual‑language warning screen)
 // Defines: window.runIntro(options) -> Promise
 
 (function () {
@@ -17,19 +17,17 @@
     gridOpacity: 0.18,          // final grid opacity (multiplied by fade progress)
     gridStroke: 1.0,            // grid line width in CSS pixels
 
-    // --- font (now using your OTF) ---
+    // --- font for TITLE TYPING (unchanged) ---
     fontURL: 'fonts/BPdotsUnicase.otf',
     fontFamily: 'BPdotsUnicase',
 
     // baseline text size: tile * textScale (used when per‑row sizes are not provided)
     textScale: 0.82,            // fraction of tile size -> font px
 
-    // OPTIONAL: per‑row absolute font size in px (one entry per title line).
-    // If provided, overrides textScale for that row.
-    // Example: [28, 22, 22, 22]
-    fontPxByRow: [32, 36, 24, 24], // null if no override
+    // OPTIONAL: per‑row absolute font size in px (one entry per title line); null to disable
+    fontPxByRow: [32, 36, 22, 22],
 
-    // --- content & layout ---
+    // --- content & layout for TITLE TYPING (unchanged) ---
     titleLines: [
       'Antalya Bilim University',
       '10+',
@@ -40,28 +38,48 @@
     padTilesTop: 1,             // top padding in tiles
     lineGapTiles: 1,            // vertical gap between rows (in tiles)
 
-    // ====== NEW: bilingual warnings (fonts + timings) ======
-    warnFadeInMs: 1200,
-    warnHoldMs: 3000,
-    warnFadeOutMs: 1200,
-    warnGapMs: 600, // blank time after each language block
+    // ---------- Dual-language WARNING (new combined screen) ----------
+    showWarning: true,
+    // Fonts for warning (as requested)
+    warnTitleBlackURL:   'fonts/Satoshi-Black.otf',   // "WARNING" / "UYARI"
+    warnBodyMediumURL:   'fonts/Satoshi-Light.otf',  // body paragraphs
+    warnTitleBlackFamily:'SatoshiBlack',
+    warnBodyMediumFamily:'SatoshiLight',
 
-    // Satoshi fonts (titles/body)
-    warnFonts: {
-      title: { family: 'SatoshiBlack',  url: 'fonts/Satoshi-Black.otf'  },
-      body:  { family: 'SatoshiMedium', url: 'fonts/Satoshi-Medium.otf' }
+    // Texts
+    warnTitleEN: 'WARNING',
+    warnBodyEN:
+      'This presentation contains flashing lights and high-contrast motion. ' +
+      'It may potentially trigger seizures for people with photosensitive epilepsy. ' +
+      'Viewer discretion is advised.',
+    warnTitleTR: 'UYARI',
+    warnBodyTR:
+      'Bu sunum, yüksek kontrastlı hareket ve yanıp sönen ışıklar içermektedir. ' +
+      'Fotosensitif epilepsisi olan kişilerde nöbetleri tetikleyebilir. ' +
+      'İzleyicilerin dikkatli olması önerilir.',
+
+    // Warning timing
+    warnFadeInMs:  900,
+    warnHoldMs:    2600,
+    warnFadeOutMs: 900,
+
+    // Warning sizing & layout (relative to viewport height)
+    warnTitlePx:   null,   // if null -> computed from H*0.030
+    warnBodyPx:    null,   // if null -> computed from H*0.024
+    warnMaxWidthVw: 40,    // max text width as % of viewport width
+    warnBlockGapPx: 24,    // vertical gap between EN and TR blocks
+    warnRule: {            // subtle separator rule between EN & TR (optional)
+      enabled: false,
+      heightPx: 1,
+      alpha: 0.24,
+      gapAbovePx: 14,
+      gapBelowPx: 14
     },
-    // Warning text (TR then EN)
-    warningsTR: [
-      'UYARI',
-      'Bu video, ışığa duyarlı epilepsi hastalarında nöbetlere neden olabilir.',
-      'İzleyicinin dikkatine sunulur.'
-    ],
-    warningsEN: [
-      'WARNING',
-      'This video may potentially trigger seizures for people with photosensitive epilepsy.',
-      'Viewer discretion is advised.'
-    ]
+
+    // Colors
+    bg: '#000000',
+    fg: '#ffffff',
+    gridColor: '#c8cacc' // stroke color for grid
   };
 
   const clamp01 = x => Math.max(0, Math.min(1, x));
@@ -119,20 +137,136 @@
     return out;
   }
 
-  // ---- NEW: draw a centered warning block with Satoshi fonts ----
-  function drawWarningBlock(ctx, cx, cy, basePx, lines, fonts) {
-    const gapPx = Math.floor(basePx * 0.6);
-    const totalH = lines.length * basePx + (lines.length - 1) * gapPx;
-    let y = cy - totalH / 2 + basePx / 2;
+  // Simple word-wrap for the warning paragraphs
+  function wrapText(ctx, text, maxWidth) {
+    const words = String(text).split(/\s+/);
+    const lines = [];
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      const test = cur ? (cur + ' ' + words[i]) : words[i];
+      if (ctx.measureText(test).width <= maxWidth) {
+        cur = test;
+      } else {
+        if (cur) lines.push(cur);
+        cur = words[i];
+      }
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
 
-    lines.forEach((ln, i) => {
-      const fam = (i === 0 ? fonts.title.family : fonts.body.family);
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = `${basePx}px "${fam}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
-      ctx.fillText(ln, cx, y);
-      y += basePx + gapPx;
+  async function showWarningIfNeeded(ctx, c, p) {
+    if (!p.showWarning) return;
+
+    // Load Satoshi fonts for warning screen
+    await Promise.all([
+      loadFont(p.warnTitleBlackURL,  p.warnTitleBlackFamily),
+      loadFont(p.warnBodyMediumURL,  p.warnBodyMediumFamily)
+    ]);
+
+    const W = c.width, H = c.height;
+    const maxW = (p.warnMaxWidthVw/100) * W;
+    const titlePx = (typeof p.warnTitlePx === 'number' && p.warnTitlePx > 0) ? p.warnTitlePx : Math.round(H * 0.024);
+    const bodyPx  = (typeof p.warnBodyPx  === 'number' && p.warnBodyPx  > 0) ? p.warnBodyPx  : Math.round(H * 0.018);
+    const blockGap = p.warnBlockGapPx|0;
+
+    // Pre-wrap both blocks
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+
+    // English block
+    ctx.font = `900 ${titlePx}px "${p.warnTitleBlackFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+    const titleENh = titlePx;
+    ctx.font = `500 ${bodyPx}px "${p.warnBodyMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+    const linesEN = wrapText(ctx, p.warnBodyEN, maxW);
+    const bodyENh = linesEN.length * (bodyPx * 1.35);
+
+    // Turkish block
+    ctx.font = `900 ${titlePx}px "${p.warnTitleBlackFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+    const titleTRh = titlePx;
+    ctx.font = `500 ${bodyPx}px "${p.warnBodyMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+    const linesTR = wrapText(ctx, p.warnBodyTR, maxW);
+    const bodyTRh = linesTR.length * (bodyPx * 1.35);
+
+    // Optional rule spacing
+    const ruleTopGap = p.warnRule.enabled ? (p.warnRule.gapAbovePx|0) : 0;
+    const ruleBotGap = p.warnRule.enabled ? (p.warnRule.gapBelowPx|0) : 0;
+    const ruleH = p.warnRule.enabled ? (p.warnRule.heightPx|0) : 0;
+
+    // Total height to vertically center two blocks
+    const totalH =
+      titleENh + (bodyENh) +
+      ruleTopGap + ruleH + ruleBotGap +
+      blockGap +
+      titleTRh + (bodyTRh);
+
+    const baseY = Math.round((H - totalH) / 2);
+    const cx = Math.round(W/2);
+
+    const t0 = performance.now();
+    const tInEnd  = t0 + p.warnFadeInMs;
+    const tHold   = tInEnd + p.warnHoldMs;
+    const tOutEnd = tHold + p.warnFadeOutMs;
+
+    return new Promise(resolve=>{
+      (function loop(now){
+        // fill BG
+        ctx.setTransform(1,0,0,1,0,0);
+        ctx.fillStyle = p.bg;
+        ctx.fillRect(0,0,W,H);
+
+        // alpha
+        let a = 1;
+        if (now <= tInEnd) a = clamp01((now - t0) / Math.max(1,p.warnFadeInMs));
+        else if (now >= tHold) a = 1 - clamp01((now - tHold) / Math.max(1,p.warnFadeOutMs));
+
+        // draw EN block
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.fg;
+        // EN title
+        ctx.font = `900 ${titlePx}px "${p.warnTitleBlackFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+        let y = baseY + titleENh;
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(p.warnTitleEN, cx, y);
+        // EN body
+        ctx.font = `500 ${bodyPx}px "${p.warnBodyMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+        y += Math.round(bodyPx * 0.85);
+        for (const line of linesEN){
+          ctx.fillText(line, cx, y);
+          y += Math.round(bodyPx * 1.35);
+        }
+
+        // separator rule
+        if (p.warnRule.enabled){
+          y += ruleTopGap;
+          ctx.globalAlpha = a * (p.warnRule.alpha ?? 0.24);
+          ctx.fillRect(Math.round(W*0.15), y, Math.round(W*0.70), ruleH>0?ruleH:1);
+          y += (ruleH>0?ruleH:1) + ruleBotGap;
+          ctx.globalAlpha = a;
+        }
+
+        // block gap before TR
+        y += blockGap;
+
+        // TR title
+        ctx.font = `900 ${titlePx}px "${p.warnTitleBlackFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+        y += titleTRh;
+        ctx.fillText(p.warnTitleTR, cx, y);
+
+        // TR body
+        ctx.font = `500 ${bodyPx}px "${p.warnBodyMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+        y += Math.round(bodyPx * 0.85);
+        for (const line of linesTR){
+          ctx.fillText(line, cx, y);
+          y += Math.round(bodyPx * 1.35);
+        }
+
+        ctx.restore();
+
+        if (now < tOutEnd) requestAnimationFrame(loop);
+        else resolve();
+      })(performance.now());
     });
   }
 
@@ -144,14 +278,19 @@
     const ctx = c.getContext('2d', { alpha: false });
     c.width = window.innerWidth; c.height = window.innerHeight;
 
-    // load fonts (existing title font + Satoshi for warnings)
-    await Promise.all([
-      loadFont(p.fontURL, p.fontFamily),
-      loadFont(p.warnFonts.title.url, p.warnFonts.title.family),
-      loadFont(p.warnFonts.body.url,  p.warnFonts.body.family)
-    ]);
+    // Always draw against hard black to avoid the “not fully black” issue
+    const bg = p.bg;
 
-    const bg = '#000000';
+    // 1) Show combined warning screen (EN over TR) if enabled
+    if (p.showWarning) {
+      // Fit canvas (in case)
+      c.width = window.innerWidth; c.height = window.innerHeight;
+      await showWarningIfNeeded(ctx, c, p);
+    }
+
+    // 2) Continue with your original intro typing
+    await loadFont(p.fontURL, p.fontFamily);
+
     const { tile, cols, rows } = computeTile();
     const GRID = makeGridPath(tile, cols, rows);
 
@@ -170,7 +309,7 @@
     const total = typingTotal + p.minTypingHoldMs + p.textFadeOutMs;
 
     const gridStart = p.gridFadeStart * total;   // when grid starts appearing
-    const gridEnd   = gridStart + p.gridFadeMs;  // (kept to preserve your original vars)
+    const gridEnd   = gridStart + p.gridFadeMs;
 
     // Optional per-row font size (px). Fallback to tile * textScale if not provided.
     let fontPxForRow = null;
@@ -184,10 +323,6 @@
       fontPxForRow = () => base;
     }
 
-    // ---- NEW: total warning time (TR + EN), each with fade in/hold/fade out + gap ----
-    const perBlock = p.warnFadeInMs + p.warnHoldMs + p.warnFadeOutMs + p.warnGapMs;
-    const warnTotal = perBlock * 2;
-
     let revealed = 0; // how many characters revealed
 
     const t0 = performance.now();
@@ -200,51 +335,19 @@
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, c.width, c.height);
 
-        // ---- warnings phase first ----
-        if (tMs < warnTotal) {
-          const half = perBlock;
-          const local = tMs < half ? tMs : (tMs - half);
-          const block = tMs < half ? p.warningsEN : p.warningsTR;
-
-          let alpha = 0;
-          if (local < p.warnFadeInMs) {
-            alpha = clamp01(local / p.warnFadeInMs);
-          } else if (local < p.warnFadeInMs + p.warnHoldMs) {
-            alpha = 1;
-          } else if (local < p.warnFadeInMs + p.warnHoldMs + p.warnFadeOutMs) {
-            const t = (local - (p.warnFadeInMs + p.warnHoldMs)) / Math.max(1, p.warnFadeOutMs);
-            alpha = clamp01(1 - t);
-          } else {
-            alpha = 0; // gap time
-          }
-
-          if (alpha > 0) {
-            ctx.save();
-            ctx.globalAlpha = alpha;
-            drawWarningBlock(ctx, c.width / 2, c.height / 2, Math.floor(tile * 0.9), block, p.warnFonts);
-            ctx.restore();
-          }
-
-          requestAnimationFrame(loop);
-          return;
-        }
-
-        // ---- normal intro after warnings (time-shifted by warnTotal) ----
-        const tIntro = tMs - warnTotal;
-
         // reveal count
-        while (revealed < schedule.length && tIntro >= schedule[revealed].t) revealed++;
+        while (revealed < schedule.length && tMs >= schedule[revealed].t) revealed++;
 
         // grid fade
         let gAlpha = 0;
-        if (tIntro >= gridStart) {
-          const k = clamp01((tIntro - gridStart) / Math.max(1, p.gridFadeMs));
+        if (tMs >= gridStart) {
+          const k = clamp01((tMs - gridStart) / Math.max(1, p.gridFadeMs));
           gAlpha = k * p.gridOpacity;
         }
         if (gAlpha > 0) {
           ctx.save();
           ctx.globalAlpha = gAlpha;
-          ctx.strokeStyle = '#c8cacc';
+          ctx.strokeStyle = p.gridColor;
           ctx.lineWidth = p.gridStroke;
           ctx.stroke(GRID);
           ctx.restore();
@@ -252,8 +355,8 @@
 
         // text fade out after typing completes + hold
         let txtAlpha = 1;
-        if (tIntro > typingTotal + p.minTypingHoldMs) {
-          const tt = (tIntro - (typingTotal + p.minTypingHoldMs)) / Math.max(1, p.textFadeOutMs);
+        if (tMs > typingTotal + p.minTypingHoldMs) {
+          const tt = (tMs - (typingTotal + p.minTypingHoldMs)) / Math.max(1, p.textFadeOutMs);
           txtAlpha = clamp01(1 - tt);
         }
 
@@ -281,7 +384,7 @@
           ctx.restore();
         }
 
-        if (tIntro < total) {
+        if (tMs < total) {
           requestAnimationFrame(loop);
         } else {
           resolve();

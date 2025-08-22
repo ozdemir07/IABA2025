@@ -4,6 +4,8 @@
 //   window.gridAPI.seedRandom(count, pool)   // seed N empty slots with images
 //   window.startMain(): Promise<void>        // start main loop (after intro)
 
+const OUTRO_COMPLETE_EVENT = 'main:outro-complete';
+
 // -------------------- PARAMS --------------------
 const BG_COLOR = '#000000';
 const GRID_OPACITY = 0.18; // grid line strength (0..1)
@@ -33,8 +35,8 @@ const FLASH_MIN = 600;
 const FLASH_MAX = 1200;
 
 // Camera choreography
-const IMAGE_DWELL_MS = 15000;   // (kept) image zooms still cycle by dwell
-const CYCLE_GAP_MS   = 15000;
+const IMAGE_DWELL_MS = 10000;   // (kept) image zooms still cycle by dwell
+const CYCLE_GAP_MS   = 5000;
 const ZOOM_TIME_MS   = 0;
 
 // Push-in factors
@@ -87,18 +89,13 @@ const REVEAL_EASE_STRENGTH = 0.8; // 0..1 — higher = faster finish
 
 // -------------------- OUTRO (video ending takes over) --------------------
 // Triggered after entering 6‑video zoom.
-// 1) Fade in UNDERLAY (BG) that hides images+grid but sits UNDER videos
-// 2) After OUTRO_DRIFT_DELAY_MS, videos drift outward & scale up for OUTRO_DRIFT_MS
-// 3) After OUTRO_VIDEO_FADE_DELAY_MS, fade in OVERLAY (BG) on top of videos
-//    to fully fade to background.
-// Once videos are fully faded, we stop the RAF to save resources.
 const OUTRO_START_DELAY_MS        = 100;    // small delay after video-zoom begins
 const OUTRO_FADE_IMAGES_MS        = 1500;   // UNDERLAY fade time (images+grid disappear)
 const OUTRO_DRIFT_DELAY_MS        = 500;    // wait before videos start drifting
 const OUTRO_DRIFT_MS              = 10000;  // drift (and scale) duration
 const OUTRO_DRIFT_DISTANCE_TILES  = 0.2;    // drift distance (in tile units)
 const OUTRO_DRIFT_SCALE           = 1.15;   // max scale during drift
-const OUTRO_VIDEO_FADE_DELAY_MS   = 87000;  // wait before fading the videos
+const OUTRO_VIDEO_FADE_DELAY_MS   = 7000;   // wait before fading the videos
 const OUTRO_FADE_VIDEOS_MS        = 3000;   // OVERLAY fade time (videos disappear)
 
 // -------------------- assets: images --------------------
@@ -644,10 +641,13 @@ function tick(now){
   cycle(now);
   draw(now);
 
-  // Stop when outro fully finished
+  // Stop when outro fully finished — and signal to the outside world
   if (outroFinished(now)){
-    cancelAnimationFrame(_rafId);
+    if (_rafId) cancelAnimationFrame(_rafId);
     _rafId = 0;
+    try {
+      window.dispatchEvent(new CustomEvent(OUTRO_COMPLETE_EVENT));
+    } catch {}
     return;
   }
 
@@ -656,6 +656,40 @@ function tick(now){
 
 // -------------------- prepare & start (public) --------------------
 let _prepared = false;
+
+// minimal reset to allow clean replays without reloading all assets
+function resetForNewRun() {
+  // camera
+  world.cam = { sx:1, sy:1, tx:0, ty:0 };
+  world.camFrom = null; world.camTo = null; world.camT0 = 0; world.camT1 = 0;
+
+  // sequencing
+  world.state = 'overview';
+  world.mode = 'image';
+  world.zoomRect = null;
+  world.zoomGroup = null;
+  world.seqIndex = 0;
+
+  // reveal overlay fresh
+  world.revealActive = false;
+  world.revealStart = 0;
+  world.coverSet = null;
+
+  // outro flags
+  world.outro.active = false;
+  world.outro.t0 = 0;
+  world.outro.startRequest = 0;
+  world.outro.underAlpha = 0;
+  world.outro.overAlpha = 0;
+  world.outro.base = [];
+
+  // ensure each slot has something to draw (seed once per run if empty)
+  for (const s of world.slots){
+    if (!s.asset) s.asset = pickAssetFromPool('all') || s.asset;
+    // nudge the flip timers so the mosaic feels fresh each run
+    s.nextFlip = performance.now() + rand(FLASH_MIN, FLASH_MAX);
+  }
+}
 
 async function prepare(){
   if (_prepared) return;
@@ -675,6 +709,9 @@ async function prepare(){
 // Start main loop (called by orchestrator after intro)
 async function startMain(){
   await prepare(); // safe if already done
+
+  // reset transient state so a looped replay starts clean
+  resetForNewRun();
 
   // Progressive reveal: initialize coverage set
   if (REVEAL_ENABLED){
