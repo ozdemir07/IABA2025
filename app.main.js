@@ -52,6 +52,17 @@ const rand = (a,b) => a + Math.random()*(b-a);
 const lerp = (a,b,t) => a + (b-a)*t;
 const ease = (t) => (t<0?0:(t>1?1:1-Math.pow(1-t,3)));
 
+// ---- CLOCK: prefer music time from app.js, else fall back to perf clock ----
+function musicNow(){
+  try {
+    if (typeof window.getMusicClock === 'function') {
+      const v = window.getMusicClock();
+      if (typeof v === 'number' && isFinite(v)) return v; // expected in ms
+    }
+  } catch {}
+  return performance.now();
+}
+
 // -------------------- canvas --------------------
 const canvas = document.getElementById('c');
 const ctx     = canvas.getContext('2d', { alpha:false });
@@ -82,9 +93,9 @@ const PAL = {
 // At the very start, paint BG-colored squares over every tile, then remove
 // them randomly for REVEAL_DURATION_MS to give "grid populating" effect.
 const REVEAL_ENABLED       = true;
-const REVEAL_DURATION_MS   = 6000;
-const REVEAL_BATCH_MIN     = 10;
-const REVEAL_BATCH_MAX     = 50;
+const REVEAL_DURATION_MS   = 4000;
+const REVEAL_BATCH_MIN     = 15;
+const REVEAL_BATCH_MAX     = 80;
 const REVEAL_EASE_STRENGTH = 0.8; // 0..1 — higher = faster finish
 
 // -------------------- OUTRO (video ending takes over) --------------------
@@ -95,7 +106,7 @@ const OUTRO_DRIFT_DELAY_MS        = 500;    // wait before videos start drifting
 const OUTRO_DRIFT_MS              = 10000;  // drift (and scale) duration
 const OUTRO_DRIFT_DISTANCE_TILES  = 0.2;    // drift distance (in tile units)
 const OUTRO_DRIFT_SCALE           = 1.15;   // max scale during drift
-const OUTRO_VIDEO_FADE_DELAY_MS   = 69000;   // wait before fading the videos
+const OUTRO_VIDEO_FADE_DELAY_MS   = 69000;  // wait before fading the videos
 const OUTRO_FADE_VIDEOS_MS        = 3000;   // OVERLAY fade time (videos disappear)
 
 // -------------------- assets: images --------------------
@@ -195,7 +206,7 @@ function buildWorld(){
         gx, gy, cx, cy, w:t, h:t,
         pool,
         asset: null, // seeded later
-        nextFlip: performance.now() + rand(FLASH_MIN, FLASH_MAX),
+        nextFlip: musicNow() + rand(FLASH_MIN, FLASH_MAX),   // << use music clock
         placeholderColor: pick(PAL.all)
       });
     }
@@ -261,14 +272,14 @@ function startZoomTo(rect, factor){
   const ty = canvas.height*0.5 - cy*s;
   world.camFrom = { ...world.cam };
   world.camTo   = { sx:s, sy:s, tx, ty };
-  world.camT0   = performance.now();
+  world.camT0   = musicNow();                  // << music clock
   world.camT1   = world.camT0 + ZOOM_TIME_MS;
   world.state   = 'toZoom';
 }
 function startZoomOut(){
   world.camFrom = { ...world.cam };
   world.camTo   = { sx:1, sy:1, tx:0, ty:0 };
-  world.camT0   = performance.now();
+  world.camT0   = musicNow();                  // << music clock
   world.camT1   = world.camT0 + ZOOM_TIME_MS;
   world.state   = 'toOut';
 }
@@ -609,6 +620,9 @@ let _rafId = 0;
 let _coverInitialCount = 0;
 
 function tick(now){
+  // Override RAF timestamp with music clock to keep everything in sync:
+  now = musicNow();
+
   stepCamera(now);
 
   // Handle reveal progression
@@ -687,7 +701,7 @@ function resetForNewRun() {
   for (const s of world.slots){
     if (!s.asset) s.asset = pickAssetFromPool('all') || s.asset;
     // nudge the flip timers so the mosaic feels fresh each run
-    s.nextFlip = performance.now() + rand(FLASH_MIN, FLASH_MAX);
+    s.nextFlip = musicNow() + rand(FLASH_MIN, FLASH_MAX);   // << music clock
   }
 }
 
@@ -724,14 +738,14 @@ async function startMain(){
     }
     world.coverSet = set;
     _coverInitialCount = set.size;
-    world.revealStart = performance.now();
+    world.revealStart = musicNow();   // << music clock
     world.revealActive = true;
   } else {
     world.revealActive = false;
     world.coverSet = null;
   }
 
-  world.phaseStart = performance.now();
+  world.phaseStart = musicNow();      // << music clock
   if (_rafId) cancelAnimationFrame(_rafId);
   _rafId = requestAnimationFrame(tick);
 }

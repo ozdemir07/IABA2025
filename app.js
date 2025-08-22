@@ -1,75 +1,33 @@
 // app.js — Orchestrates: runIntro() → startMain() → runEnding()  (loops optional)
+// - Waits for one-time audio permission (from permission.js) before first run
+// - Starts background.mp3 exactly when app.main starts on every loop (no audio looping)
+
 (function () {
   'use strict';
 
   const BOOT_TIMEOUT_MS = 15000;
   const OUTRO_COMPLETE_EVENT = 'main:outro-complete'; // must match app.main.js
-  const LOOP_WAIT_MS = 1200;                           // small pause before restarting
+  const LOOP_WAIT_MS = 1200;
 
-  // --- AUDIO (start main exactly when audio starts) ---
-  const AUDIO_URL = 'audio/background.mp3'; // put your file here
-  const AUDIO_PRELOAD_TIMEOUT_MS = 8000;
+  // ---------- MUSIC (starts with main each loop; no loop) ----------
+  const MUSIC_URL = 'audio/background.mp3';
+  const music = new Audio();
+  music.src = MUSIC_URL;
+  music.preload = 'auto';
+  music.loop = false;
+  music.crossOrigin = 'anonymous';
+  music.playsInline = true; // iOS
 
-  const audioCtl = {
-    el: null,
-    ready: false,
-    loadPromise: null
+  // >>> Minimal addition: expose a music clock for app.main.js <<<
+  // app.main.js calls window.getMusicClock() and will prefer this over performance.now()
+  window.getMusicClock = function () {
+    if (music && !music.paused && isFinite(music.currentTime)) {
+      return music.currentTime * 1000; // milliseconds
+    }
+    return performance.now(); // fallback when music not started yet
   };
 
-  function preloadAudio(url = AUDIO_URL, timeoutMs = AUDIO_PRELOAD_TIMEOUT_MS) {
-    if (audioCtl.loadPromise) return audioCtl.loadPromise;
-
-    const el = new Audio();
-    el.preload = 'auto';
-    el.src = url;
-    el.crossOrigin = 'anonymous'; // harmless if local
-    audioCtl.el = el;
-
-    audioCtl.loadPromise = new Promise((resolve) => {
-      let done = false;
-      const finish = (ok) => { if (done) return; done = true; audioCtl.ready = ok; resolve(ok); };
-
-      const onReady = () => { el.removeEventListener('canplaythrough', onReady); finish(true); };
-      const onErr   = () => { el.removeEventListener('error', onErr); finish(false); };
-
-      el.addEventListener('canplaythrough', onReady, { once: true });
-      el.addEventListener('error', onErr, { once: true });
-
-      // Kick load (some browsers need explicit .load())
-      try { el.load(); } catch {}
-
-      // Timeout fallback so we never hang boot
-      setTimeout(() => finish(false), timeoutMs);
-    });
-
-    return audioCtl.loadPromise;
-  }
-
-  async function playAudioNowOrOnGesture() {
-    if (!audioCtl.el) return; // nothing to do
-    // If it’s already playing, keep it (don’t restart, avoids overlaps across loops)
-    if (!audioCtl.el.paused && !audioCtl.el.ended) return;
-
-    try {
-      // Try immediate play (will work if browser allows autoplay or you previously interacted)
-      await audioCtl.el.play();
-      return;
-    } catch {
-      // Autoplay blocked — arm a one-time gesture unlock and start main only when audio starts
-      await new Promise((resolve) => {
-        const handler = async () => {
-          window.removeEventListener('pointerdown', handler);
-          window.removeEventListener('keydown', handler);
-          try { await audioCtl.el.play(); } catch {}
-          resolve();
-        };
-        window.addEventListener('pointerdown', handler, { once: true });
-        window.addEventListener('keydown', handler,   { once: true });
-      });
-    }
-  }
-
-  // --- small helpers ---
+  // Helpers
   function waitFor(cond, timeoutMs = BOOT_TIMEOUT_MS) {
     const t0 = performance.now();
     return new Promise((res, rej) => {
@@ -82,74 +40,78 @@
   }
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // Run one full cycle: intro → (start audio & main in sync) → wait outro → ending
+  // Wait for the one-time audio permission screen (permission.js)
+  async function waitForUserAudioPermit() {
+    // We support either a function or a promise, depending on your permission.js
+    // 1) function window.waitForPermission()
+    if (typeof window.waitForPermission === 'function') {
+      await window.waitForPermission();
+      return;
+    }
+    // 2) window.permission.ready is a Promise or a function returning a Promise
+    if (window.permission) {
+      const r = window.permission.ready;
+      if (typeof r === 'function') { await r(); return; }
+      if (r && typeof r.then === 'function') { await r; return; }
+    }
+    // 3) Fallback: require a gesture once if autoplay is still blocked
+    try {
+      await music.play();           // try to unlock immediately if browser allows
+      music.pause(); music.currentTime = 0;
+    } catch {
+      await new Promise(resolve => {
+        const once = async () => {
+          window.removeEventListener('pointerdown', once);
+          window.removeEventListener('keydown', once);
+          try { await music.play(); music.pause(); music.currentTime = 0; } catch {}
+          resolve();
+        };
+        window.addEventListener('pointerdown', once, { once:true });
+        window.addEventListener('keydown',     once, { once:true });
+      });
+    }
+  }
+
+  // One full cycle
   async function runOnce() {
-    // Ensure modules are present
+    // Ensure modules present
     await waitFor(() => typeof window.runIntro === 'function');
     await waitFor(() => window.gridAPI && typeof window.gridAPI.prepare === 'function');
     await waitFor(() => typeof window.startMain === 'function');
     await waitFor(() => typeof window.runEnding === 'function');
 
-    // Start preloading audio while intro runs
-    const audioPreload = preloadAudio();
-
-    // Intro first
+    // Intro (no audio)
     await window.runIntro();
 
-    // Ensure audio buffered (don’t block forever if network is slow)
-    await audioPreload.catch(()=>{});
+    // Start music and main **on the same frame**; music does NOT loop.
+    // If the user already granted permission, play() will resolve immediately.
+    music.currentTime = 0;
+    try { await music.play(); } catch {} // if blocked somehow, permission.js already handled it
+    await window.startMain();            // begin main right after music starts
 
-    // Start AUDIO and MAIN on the same frame:
-    //  - If autoplay is allowed, play() resolves immediately and we start main right away.
-    //  - If blocked, we wait for the first user gesture, then play() and start main.
-    let mainStarted = false;
-    const startMainSynced = async () => {
-      if (mainStarted) return;
-      mainStarted = true;
-      await window.startMain();
-    };
-
-    try {
-      await audioCtl.el?.play();
-      // Audio started immediately — start main now (same microtask/frame)
-      await startMainSynced();
-    } catch {
-      // Autoplay blocked — wait for gesture, then start both
-      await new Promise((resolve) => {
-        const handler = async () => {
-          window.removeEventListener('pointerdown', handler);
-          window.removeEventListener('keydown', handler);
-          try { await audioCtl.el?.play(); } catch {}
-          await startMainSynced();
-          resolve();
-        };
-        window.addEventListener('pointerdown', handler, { once: true });
-        window.addEventListener('keydown', handler,   { once: true });
-      });
-    }
-
-    // Wait for the main sequence to signal that its “outro” (video fade out) is complete
-    await new Promise((resolve) => {
-      const once = () => { window.removeEventListener(OUTRO_COMPLETE_EVENT, once); resolve(); };
-      window.addEventListener(OUTRO_COMPLETE_EVENT, once, { once: true });
+    // Wait until app.main signals that its outro (video fade to BG) is complete
+    await new Promise(resolve => {
+      window.addEventListener(OUTRO_COMPLETE_EVENT, resolve, { once:true });
     });
 
-    // Run ending (logo/title)
+    // Ending (logo/title)
     await window.runEnding();
   }
 
   async function boot() {
     console.log('[orchestrator] boot…');
 
-    // Ensure DOM ready
     if (document.readyState !== 'complete') {
       await new Promise(r => window.addEventListener('load', r, { once: true }));
     }
 
+    // One-time: wait for permission screen to be accepted so audio can play later without extra clicks
+    await waitForUserAudioPermit();
+
     // First run
     await runOnce();
 
-    // Loop if enabled
+    // Loop intro→main→ending if enabled
     const shouldLoop = (typeof window.APP_LOOP === 'boolean') ? window.APP_LOOP : false;
     while (shouldLoop) {
       await sleep(LOOP_WAIT_MS);

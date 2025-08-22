@@ -25,7 +25,7 @@
     textScale: 0.82,            // fraction of tile size -> font px
 
     // OPTIONAL: per‑row absolute font size in px (one entry per title line); null to disable
-    fontPxByRow: [32, 36, 22, 22],
+    fontPxByRow: [32, 36, null, 22, 22, null, 22, 22],
 
     // --- content & layout for TITLE TYPING (unchanged) ---
     titleLines: [
@@ -88,7 +88,7 @@
     // --- click SFX for typing (new) ---
     clickEnabled: true,
     clickURL: 'audio/digital-click.mp3',
-    clickForRows: [0, 1, 2, 3, 4, 5, 6, 7],   // play clicks for rows 0 ("Antalya Bilim University") and 1 ("10+")
+    clickForRows: [0, 1, 3, 4, 6, 7],   // play clicks for rows 0 ("Antalya Bilim University") and 1 ("10+")
     clickVolume: 0.6        // 0..1
   };
 
