@@ -31,8 +31,12 @@
     titleLines: [
       'Antalya Bilim University',
       '10+',
-      'Ontology of Representations; Co-construction of Knowledge',
-      'Temsillerin Ontolojisi; Bilginin Ortaklaşa İnşası'
+      '',
+      'Ontology of Representations;',
+      'Co-construction of Knowledge',
+      '',
+      'Temsillerin Ontolojisi;',
+      'Bilginin Ortaklaşa İnşası'
     ],
     padTilesLeft: 1,            // left padding in tiles
     padTilesTop: 1,             // top padding in tiles
@@ -84,7 +88,7 @@
     // --- click SFX for typing (new) ---
     clickEnabled: true,
     clickURL: 'audio/digital-click.mp3',
-    clickForRows: [0, 1, 2, 3],   // play clicks for rows 0 ("Antalya Bilim University") and 1 ("10+")
+    clickForRows: [0, 1, 2, 3, 4, 5, 6, 7],   // play clicks for rows 0 ("Antalya Bilim University") and 1 ("10+")
     clickVolume: 0.6        // 0..1
   };
 
