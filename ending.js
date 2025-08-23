@@ -124,6 +124,9 @@
         const centerX = W/2;
         const baseY = Math.round(H*0.55); // vertical anchor for two lines
 
+        // Logo anchor (centered on screen)
+        const logoY = Math.round(H * 0.5);
+
         // Opacities
         const a1 = clamp01((now - t0) / p.line1FadeInMs);              // line1 fade-in
         const a2 = clamp01((now - tLine2InStart) / p.line2FadeInMs);   // line2 fade-in
@@ -177,7 +180,7 @@
             ctx.save();
             ctx.globalAlpha = logoAlpha;
             ctx.imageSmoothingEnabled = true;
-            ctx.drawImage(logo, centerX - dw/2, baseY - dh/2, dw, dh);
+            ctx.drawImage(logo, centerX - dw/2, logoY - dh/2, dw, dh);
             ctx.restore();
           }
         }
