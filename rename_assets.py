@@ -3,8 +3,7 @@
 Batch renamer for IABA2025 assets.
 
 Folders (any that exist under ROOT) are mapped to prefixes:
-  plans -> p, sections -> s, site-plans -> sp, diagrams -> d,
-  perspectives -> r, mockup/mockups -> m
+  plans -> p, sections -> s, site-plans -> sp, diagrams -> d
 
 Examples:
   assets/plans/anything.png        -> assets/plans/p001.jpg   (if --jpg)
@@ -26,9 +25,7 @@ FOLDER_PREFIX: Dict[str, str] = {
     "plans": "p",
     "sections": "s",
     "site-plans": "sp",
-    "diagrams": "d",
-    "perspectives": "r",
-    "mockups": "m",  
+    "diagrams": "d", 
 }
 
 # File types to rename

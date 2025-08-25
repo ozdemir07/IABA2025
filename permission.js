@@ -40,11 +40,17 @@
 
     // Keep your existing typography choices
     overlay.innerHTML = `
-      <h1 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 3.5rem; margin: 0 0 1rem;">IABA 2025</h1>
-      <h2 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 2.0rem; margin: 0 0 1rem;">Intersubjectivity – Öznelerarasılık</h2>
-      <h3 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 1.5rem; margin: 0 0 2rem;">Antalya Bilim University</h3>
-      <p1 style="font-family: SatoshiLight, system-ui, sans-serif; font-size: 1.2rem; opacity: 0.85;">Click or Tap to continue</p1>
-      <p2 style="font-family: SatoshiLight, system-ui, sans-serif; font-size: 1.2rem; opacity: 0.85;">Do not close this page</p2>
+      <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+        <h1 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 4rem; margin: 0 0 1rem;">IABA 2025</h1>
+        <h2 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 2.5rem; margin: 0 0 2rem;">Intersubjectivity – Öznelerarasılık</h2>
+        <h3 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 1.5rem; margin: 0 0 0.6rem;">Antalya Bilim University</h3>
+        <h4 style="font-family: BPdotsUnicase, system-ui, sans-serif; font-size: 1.5rem; margin: 0 0 4rem;">Department of Architecture</h4>
+        <p1 style="font-family: SatoshiLight, system-ui, sans-serif; font-size: 1.2rem; opacity: 0.85;">Click or Tap to continue</p1>
+        <p2 style="font-family: SatoshiLight, system-ui, sans-serif; font-size: 1.2rem; opacity: 0.85;">Do not close this page</p2>
+      </div>
+        <div style="margin-bottom: 2rem; display:flex; justify-content:center; width:100%;">
+          <img src="assets/teads-logo.png" alt="TEAD.Studio Logo"
+               style="width: 100px; height: auto; object-fit: contain;" />  
     `;
 
     document.body.appendChild(overlay);

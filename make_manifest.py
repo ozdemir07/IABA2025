@@ -13,8 +13,6 @@ GROUPS = {
     "sections":      "sections",
     "siteplans":     "site-plans",
     "diagrams":      "diagrams",
-    "perspectives":  "perspectives",
-    "mockups":       "mockups",
 }
 
 # file extensions we will include

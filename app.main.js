@@ -1,4 +1,4 @@
-// app.main.js — square-grid flasher + 6 image zooms + centered 6‑video zoom
+// app.main.js — square-grid flasher + 4 image zooms + centered 4‑video zoom
 // Public API used by intro/orchestrator:
 //   window.gridAPI.prepare(): Promise<void>   // build grid + load manifests, no animation yet
 //   window.gridAPI.seedRandom(count, pool)   // seed N empty slots with images
@@ -11,21 +11,25 @@ const BG_COLOR = '#000000';
 const GRID_OPACITY = 0.18; // grid line strength (0..1)
 
 // Overview density (tiles stay SQUARE; baselines)
-const OVER_COLS_BASE = 44;
-const OVER_ROWS_BASE = 44;
+const OVER_COLS_BASE = 35;
+const OVER_ROWS_BASE = 35;
 
 // Portrait defaults
 const PORTRAIT = {
   ZOOM_COLS: 9,  ZOOM_ROWS: 16,
   VIDEO_WIN_COLS: 4, VIDEO_WIN_ROWS: 5,
-  VIDEO_CENTER_COLS: 2, VIDEO_CENTER_ROWS: 3
+  VIDEO_CENTER_COLS: 2, VIDEO_CENTER_ROWS: 2   // ← was 2×3, now 2×2
 };
+
 // Landscape defaults
 const LANDSCAPE = {
   ZOOM_COLS: 16, ZOOM_ROWS: 9,
   VIDEO_WIN_COLS: 5, VIDEO_WIN_ROWS: 4,
-  VIDEO_CENTER_COLS: 3, VIDEO_CENTER_ROWS: 2
+  VIDEO_CENTER_COLS: 2, VIDEO_CENTER_ROWS: 2   // ← was 3×2, now 2×2
 };
+
+// How many videos we actually render in the center block
+const NUM_VIDEOS = () => (VIDEO_CENTER_COLS * VIDEO_CENTER_ROWS);
 
 // Will be set in resize()
 let ZOOM_COLS, ZOOM_ROWS, VIDEO_WIN_COLS, VIDEO_WIN_ROWS, VIDEO_CENTER_COLS, VIDEO_CENTER_ROWS;
@@ -40,11 +44,11 @@ const CYCLE_GAP_MS   = 6000;
 const ZOOM_TIME_MS   = 0;
 
 // Push-in factors
-const IMAGE_ZOOM_FACTOR = 1.20;
+const IMAGE_ZOOM_FACTOR = 1.65;
 const VIDEO_ZOOM_FACTOR = 1.60;
 
 // Groups (must match manifest keys; we also accept "sitePlans")
-const GROUPS = ['plans','sections','siteplans','diagrams','perspectives','mockups'];
+const GROUPS = ['plans','sections','siteplans','diagrams'];
 
 // -------------------- helpers --------------------
 const pick = (arr) => arr[(Math.random()*arr.length)|0];
@@ -72,7 +76,7 @@ const IMAGE_MANIFEST_URL = 'data/manifest.json';
 const VIDEO_MANIFEST_URL = 'data/videos.json';
 
 // image pools
-const IMAGES = { plans:[], sections:[], siteplans:[], diagrams:[], perspectives:[], mockups:[] };
+const IMAGES = { plans:[], sections:[], siteplans:[], diagrams:[] };
 let ALL = []; // flattened
 
 // placeholders OFF by default
@@ -85,8 +89,6 @@ const PAL = {
   sections:     ['#b2b7bb','#a5abb0','#979ea4','#8a9197'],
   siteplans:    ['#9fa5aa','#92989d','#858b90','#777d82'],
   diagrams:     ['#9c9c9c','#8f8f8f','#828282','#757575'],
-  perspectives: ['#b1b1b1','#a4a4a4','#979797','#8a8a8a'],
-  mockups:      ['#c0c3c6','#b3b7bb','#a6abb0','#999fa4'],
 };
 
 // -------------------- progressive reveal (overlay) --------------------
@@ -99,15 +101,22 @@ const REVEAL_BATCH_MAX     = 80;
 const REVEAL_EASE_STRENGTH = 0.8; // 0..1 — higher = faster finish
 
 // -------------------- OUTRO (video ending takes over) --------------------
-// Triggered after entering 6‑video zoom.
+// Triggered after entering 4‑video zoom.
 const OUTRO_START_DELAY_MS        = 100;    // small delay after video-zoom begins
 const OUTRO_FADE_IMAGES_MS        = 1500;   // UNDERLAY fade time (images+grid disappear)
 const OUTRO_DRIFT_DELAY_MS        = 500;    // wait before videos start drifting
 const OUTRO_DRIFT_MS              = 10000;  // drift (and scale) duration
-const OUTRO_DRIFT_DISTANCE_TILES  = 0.2;    // drift distance (in tile units)
-const OUTRO_DRIFT_SCALE           = 1.15;   // max scale during drift
-const OUTRO_VIDEO_FADE_DELAY_MS   = 69000;  // wait before fading the videos
+const OUTRO_DRIFT_DISTANCE_TILES  = 0.22;   // drift distance (in tile units)
+const OUTRO_DRIFT_SCALE           = 1.1;    // max scale during drift
+const OUTRO_VIDEO_FADE_DELAY_MS   = 99000;  // wait before fading the videos
 const OUTRO_FADE_VIDEOS_MS        = 3000;   // OVERLAY fade time (videos disappear)
+// --- OUTRO (tweaks for one special video) ---
+const OUTRO_DRIFT_OVERRIDE_INDEX   = -1; 
+const OUTRO_DRIFT_TILES_X          = 0.2;   // +X tiles (right). e.g., 0.5 ≈ half a square
+const OUTRO_DRIFT_TILES_Y          = -0.35;  // +Y tiles (down).  e.g., 0.25 ≈ quarter square
+const OUTRO_DRIFT_OVERRIDE_SCALE   = 1.9;   // extra scale vs others at end (2.0 ≈ double)
+// --- Optional z‑order override (higher value = drawn later = on top)
+const VIDEO_Z_BIAS = [0, 1, 0, 0]; // here, index 1 > others, so #1 is drawn last (above #3)
 
 // -------------------- assets: images --------------------
 async function loadImagesManifest() {
@@ -126,9 +135,7 @@ async function loadImagesManifest() {
     plans: data.plans || [],
     sections: data.sections || [],
     siteplans,
-    diagrams: data.diagrams || [],
-    perspectives: data.perspectives || [],
-    mockups: data.mockups || []
+    diagrams: data.diagrams || []
   };
 
   Object.keys(map).forEach(group=>{
@@ -145,7 +152,7 @@ async function loadImagesManifest() {
   });
 
   ALL = [...IMAGES.plans, ...IMAGES.sections, ...IMAGES.siteplans,
-         ...IMAGES.diagrams, ...IMAGES.perspectives, ...IMAGES.mockups];
+         ...IMAGES.diagrams];
 
   console.log(`[images] pools loaded — total assets: ${ALL.length}`);
 }
@@ -178,7 +185,8 @@ const world = {
     startRequest: 0,      // when we decided to start (we'll wait OUTRO_START_DELAY_MS)
     underAlpha: 0,        // images+grid fade alpha (via underlay)
     overAlpha: 0,         // videos fade alpha (via overlay)
-    base: [],             // 6 entries: {x,y,size, dirX,dirY} in TILE SPACE
+    base: [],             // 4 entries: {x,y,size, dirX,dirY} in TILE SPACE
+    overrideIndex: null   // for drift override
   }
 };
 
@@ -296,7 +304,7 @@ function stepCamera(now){
 
 // -------------------- videos (from data/videos.json) --------------------
 const RANDOMIZE_VIDEO_START = true;
-const videos = []; // up to 6 entries { el, ready }
+const videos = []; // up to 4 entries { el, ready }
 
 async function loadVideos(){
   let sources = [];
@@ -310,21 +318,21 @@ async function loadVideos(){
     console.error('[videos] Failed to load videos.json:', err);
   }
 
-  for (let i=0;i<6;i++){
+  for (let i = 0; i < NUM_VIDEOS(); i++) {
     const src = sources[i];
     const el = document.createElement('video');
     el.muted = true; el.loop = true; el.playsInline = true; el.preload = 'auto';
     if (src) el.src = src;
     const v = { el, ready:false };
     el.addEventListener('playing', ()=> v.ready = true);
-    el.addEventListener('loadeddata', ()=>{
+    el.addEventListener('loadeddata', ()=> {
       try{
         if (RANDOMIZE_VIDEO_START && el.duration && isFinite(el.duration)){
           el.currentTime = Math.random() * el.duration * 0.85;
         } else el.currentTime = 0;
         el.play();
       }catch{}
-    }, { once:true });
+   }, { once:true });
     videos.push(v);
   }
 }
@@ -425,6 +433,11 @@ function startOutro(now){
   world.outro.base = base;
   world.outro.t0 = now;
   world.outro.active = true;
+
+    // Compute override index NOW, when VIDEO_CENTER_* are known.
+    // “last element” (bottom-right in row-major) = NUM_VIDEOS() - 1
+    world.outro.overrideIndex =
+      (OUTRO_DRIFT_OVERRIDE_INDEX >= 0 ? OUTRO_DRIFT_OVERRIDE_INDEX : (NUM_VIDEOS() - 1));
 }
 
 function maybeKickOutro(now){
@@ -524,10 +537,10 @@ function draw(now){
     }
   }
 
-  // --- LAYER 2: draw the 6 videos (either static tiles or drifting in outro) ---
+  // --- LAYER 2: draw the 4 videos (either static tiles or drifting in outro) ---
   if (world.mode==='video' && world.zoomRect){
     const basePositions = [];
-    if (world.outro.active && world.outro.base.length === 6){
+    if (world.outro.active && world.outro.base.length === NUM_VIDEOS()){
       const elapsed = now - world.outro.t0;
       const driftElapsed = Math.max(0, elapsed - OUTRO_DRIFT_DELAY_MS);
       const driftT = OUTRO_DRIFT_MS > 0 ? Math.min(1, driftElapsed / OUTRO_DRIFT_MS) : 1;
@@ -535,27 +548,42 @@ function draw(now){
       const dist = OUTRO_DRIFT_DISTANCE_TILES * world.tile * eased;
       const scale = lerp(1, OUTRO_DRIFT_SCALE, eased);
 
-      for (let i=0;i<6;i++){
+      for (let i=0;i<NUM_VIDEOS();i++){
         const b = world.outro.base[i];
-        const x = b.x + b.dirX * dist;
-        const y = b.y + b.dirY * dist;
-        const s = b.size * scale;
+        // normal outward drift
+        let x = b.x + b.dirX * dist;
+        let y = b.y + b.dirY * dist;
+        let s = b.size * scale;
+
+        // use the computed runtime index
+        const ovrIdx = (world.outro.overrideIndex ?? -1);
+        if (ovrIdx >= 0 && i === ovrIdx){
+          x += world.tile * OUTRO_DRIFT_TILES_X * eased;
+          y += world.tile * OUTRO_DRIFT_TILES_Y * eased;
+          s *= lerp(1, OUTRO_DRIFT_OVERRIDE_SCALE, eased);
+        }
+
         basePositions.push({ x, y, s });
       }
     } else {
+      // not in outro: keep the regular 2x2 layout
       for (let row=0; row<VIDEO_CENTER_ROWS; row++){
         for (let col=0; col<VIDEO_CENTER_COLS; col++){
           const gx = vx0 + col;
           const gy = vy0 + row;
           basePositions.push({ x: gx*world.tile, y: gy*world.tile, s: world.tile });
-        }
+       }
       }
     }
 
-    for (let i=0;i<6;i++){
-      const p = basePositions[i];
+    // draw with z‑order bias: higher bias → later draw → on top
+    const order = Array.from({ length: NUM_VIDEOS() }, (_, i) => i)
+      .sort((a, b) => (VIDEO_Z_BIAS[a] - VIDEO_Z_BIAS[b]) || (a - b));
+
+    for (const i of order) {
+     const p = basePositions[i];
       if (!p) continue;
-      drawVideoInTile(videos[i] || {el:{},ready:false}, p.x, p.y, p.s);
+     drawVideoInTile(videos[i] || {el:{},ready:false}, p.x, p.y, p.s);
     }
   }
 

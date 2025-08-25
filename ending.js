@@ -1,6 +1,6 @@
 // ending.js — TEAD.Studio credit splash after main outro completes
 // Public: window.runEnding(options) -> Promise<void>
-// Draws on its own overlay canvas (#ending), then removes it.
+// Draws a single "movie-style" credits card (fade in/out) then the TEADS logo (fade in/out).
 
 (function () {
   'use strict';
@@ -10,31 +10,43 @@
     bg: '#000000',
     fg: '#ffffff',
 
-    // Texts
-    title1: 'Digital Presentation Made By', // Satoshi Light
-    title2: 'TEAD.Studio',                      // Satoshi Medium
-    line1SizeRatio: 0.025,  // fraction of viewport height
-    line2SizeRatio: 0.040,
+    // --- Credit content (movie-style, two centered columns) ---
+    // Left = role, Right = names
+    credits: [
+      { role: 'DIGITAL PRESENTATION & VIDEO CHOREOGRAPHY', name: 'Tolga Özdemir / TEAD.Studio' },
+      { role: 'CURATOR / COORDINATOR',                     name: 'Alper Gülle' },
+      { role: 'RESEARCH & EDITORIAL SUPPORT',              name: 'Songül Sancak' },
+      { role: '',                                          name: 'Ahmet Berat Köksal' },
+      // "Music" with an italic note:
+      { role: 'MUSIC',                                     name: 'Tolga Özdemir / TEAD.Studio (Composed with Suno)', italicNote: '(Composed with Suno)' },
+    ],
 
-    // Fonts (adjust to your files)
+    // Fonts (kept as you had)
     fontLightURL:  'fonts/Satoshi-Light.otf',
     fontMediumURL: 'fonts/Satoshi-Medium.otf',
     fontLightFamily:  'SatoshiLight',
     fontMediumFamily: 'SatoshiMedium',
 
-    // Logo
-    logoURL: 'assets/teads-logo.png',    // e.g. 'media/teads-logo.svg' (optional)
-    logoScale: 0.25,  // fraction of min(viewportW, viewportH)
+    // Sizing (relative to viewport height)
+    rolePx:  24,               // if null -> H * 0.026
+    namePx:  42,               // if null -> H * 0.030
+    rowGapPx: 18,              // vertical gap between rows
+    colGapVw: 2,               // horizontal gap between role and name columns in vw
+    maxBlockWidthVw: 72,       // keep the whole block within this width (vw)
 
-    // Timing (ms)
-    line1FadeInMs:  1500,
-    line2DelayMs:   1500,   // start line2 after this delay (while line1 is visible)
-    line2FadeInMs:  1500,
-    holdBothMs:     1000,  // keep both lines on screen before fading them
-    linesFadeOutMs: 1000,   // fade out both lines while logo fades in
+    // Logo
+    logoURL: 'assets/teads-logo.png',
+    logoScale: 0.40,           // fraction of min(viewportW, viewportH)
+
+    // Timing (ms) — preserved keys; reused for credits card timing
+    line1FadeInMs:  500,       // used as: creditsFadeInMs
+    line2DelayMs:   0,         // (ignored now)
+    line2FadeInMs:  0,         // (ignored now)
+    holdBothMs:     3500,      // used as: creditsHoldMs
+    linesFadeOutMs: 1000,      // used as: creditsFadeOutMs
     logoFadeInMs:   1500,
-    logoHoldMs:     2000,  // hold logo at full opacity
-    logoFadeOutMs:  2000,   // optional: fade to black before resolve
+    logoHoldMs:     2000,
+    logoFadeOutMs:  2000,
     removeOnFinish: true
   };
 
@@ -85,6 +97,41 @@
     });
   }
 
+  // Measure wrapped width helper (no wrapping here; we just measure and cap block width)
+  function measureBlock(ctx, p, H, W, credits){
+    const rolePx = (typeof p.rolePx === 'number' && p.rolePx>0) ? p.rolePx : Math.round(H*0.026);
+    const namePx = (typeof p.namePx === 'number' && p.namePx>0) ? p.namePx : Math.round(H*0.030);
+    const colGap = (p.colGapVw/100) * W;
+    const maxBlock = (p.maxBlockWidthVw/100) * W;
+
+    ctx.textBaseline = 'alphabetic';
+
+    let maxRole = 0, maxName = 0;
+    for (const row of credits){
+      // role
+      if (row.role) {
+        ctx.font = `500 ${rolePx}px "${p.fontMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+        maxRole = Math.max(maxRole, ctx.measureText(row.role).width);
+      }
+      // name (split italic note width if present)
+      ctx.font = `300 ${namePx}px "${p.fontLightFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+      let nameWidth = ctx.measureText(row.name).width;
+      if (row.italicNote && row.name.includes(row.italicNote)) {
+        const head = row.name.replace(row.italicNote, '').trimEnd();
+        const headW = ctx.measureText(head).width;
+        ctx.font = `italic 300 ${namePx}px "${p.fontLightFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+        const noteW = ctx.measureText(row.italicNote).width;
+        nameWidth = headW + noteW;
+      }
+      maxName = Math.max(maxName, nameWidth);
+    }
+
+    const total = maxRole + colGap + maxName;
+    const scale = total > maxBlock ? (maxBlock / total) : 1;
+
+    return { rolePx, namePx, colGap, maxRole: maxRole*scale, maxName: maxName*scale, scale };
+  }
+
   window.runEnding = async function runEnding(opts={}){
     const p = { ...DEF, ...opts };
 
@@ -102,14 +149,13 @@
     ]);
     const logo = await loadImage(p.logoURL);
 
-    // Timeline
+    // Timeline (reuse your param names)
     const t0 = performance.now();
-    const tLine1InEnd = t0 + p.line1FadeInMs;
-    const tLine2InStart = t0 + p.line2DelayMs;
-    const tLine2InEnd   = tLine2InStart + p.line2FadeInMs;
-    const tHoldEnd      = Math.max(tLine2InEnd, tLine1InEnd) + p.holdBothMs;
-    const tLinesOutEnd  = tHoldEnd + p.linesFadeOutMs;
-    const tLogoInEnd    = tHoldEnd + p.logoFadeInMs;   // logo starts at hold start
+    const tCreditsInEnd = t0 + p.line1FadeInMs;     // credits fade-in
+    const tHoldEnd      = tCreditsInEnd + p.holdBothMs;
+    const tCreditsOutEnd= tHoldEnd + p.linesFadeOutMs;
+
+    const tLogoInEnd    = tHoldEnd + p.logoFadeInMs;   // logo starts at the same moment as credits start fading
     const tLogoHoldEnd  = tLogoInEnd + p.logoHoldMs;
     const tLogoOutEnd   = tLogoHoldEnd + p.logoFadeOutMs;
 
@@ -121,55 +167,80 @@
         ctx.fillRect(0,0,c.width,c.height);
 
         const W = c.width, H = c.height;
-        const centerX = W/2;
-        const baseY = Math.round(H*0.55); // vertical anchor for two lines
+        const block = measureBlock(ctx, p, H, W, p.credits);
+        const rolePx = Math.round(block.rolePx * block.scale);
+        const namePx = Math.round(block.namePx * block.scale);
+        const colGap = block.colGap * block.scale;
 
-        // Logo anchor (centered on screen)
-        const logoY = Math.round(H * 0.5);
+        // Compute column anchors (centered as a whole)
+        const totalW = block.maxRole + colGap + block.maxName;
+        const leftColRightX  = Math.round((W - totalW)/2 + block.maxRole);
+        const rightColLeftX  = Math.round(leftColRightX + colGap);
 
-        // Opacities
-        const a1 = clamp01((now - t0) / p.line1FadeInMs);              // line1 fade-in
-        const a2 = clamp01((now - tLine2InStart) / p.line2FadeInMs);   // line2 fade-in
-        const outK = clamp01((now - tHoldEnd) / p.linesFadeOutMs);     // both lines fade-out
-        const lineAlpha = (1 - outK);
+        // --- Credits opacity (fade in → hold → fade out) ---
+        let creditsA = 1;
+        if (now <= tCreditsInEnd) {
+          creditsA = clamp01((now - t0) / Math.max(1, p.line1FadeInMs));
+        } else if (now >= tHoldEnd) {
+          creditsA = 1 - clamp01((now - tHoldEnd) / Math.max(1, p.linesFadeOutMs));
+        }
 
-        // Draw Line 1 (Satoshi Light)
-        if (lineAlpha > 0){
+        // Draw credits block (center vertically)
+        if (creditsA > 0){
           ctx.save();
-          ctx.globalAlpha = a1 * lineAlpha;
+          ctx.globalAlpha = creditsA;
           ctx.fillStyle = p.fg;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.font = `300 ${Math.round(H*p.line1SizeRatio)}px "${p.fontLightFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
-          ctx.fillText(p.title1, centerX, baseY - Math.round(H*0.04));
+          ctx.textBaseline = 'alphabetic';
+
+          const rows = p.credits.length;
+          const lineGap = p.rowGapPx|0;
+          const roleAsc = rolePx; // approximate line height
+          const nameAsc = namePx;
+          const lineH = Math.max(roleAsc, nameAsc) + lineGap;
+
+          const blockH = rows * lineH - lineGap;
+          let y = Math.round((H - blockH)/2 + roleAsc); // baseline for first row
+
+          for (const row of p.credits){
+            // ROLE (right aligned)
+            if (row.role) {
+              ctx.textAlign = 'right';
+              ctx.font = `500 ${rolePx}px "${p.fontMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+              ctx.fillText(row.role, leftColRightX, y);
+            }
+
+            // NAME (left aligned)
+            ctx.textAlign = 'left';
+            // If we have an italic note inside the name, draw it in two parts
+            if (row.italicNote && row.name.includes(row.italicNote)) {
+              const head = row.name.replace(row.italicNote, '').trimEnd();
+              ctx.font = `300 ${namePx}px "${p.fontLightFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+              const headW = ctx.measureText(head).width;
+              ctx.fillText(head, rightColLeftX, y);
+
+              ctx.font = `italic 300 ${namePx}px "${p.fontLightFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+              ctx.fillText(row.italicNote, rightColLeftX + headW, y);
+            } else {
+              ctx.font = `300 ${namePx}px "${p.fontLightFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+              ctx.fillText(row.name, rightColLeftX, y);
+            }
+
+            y += lineH;
+          }
           ctx.restore();
         }
 
-        // Draw Line 2 (Satoshi Medium)
-        if (lineAlpha > 0){
-          ctx.save();
-          ctx.globalAlpha = a2 * lineAlpha;
-          ctx.fillStyle = p.fg;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.font = `500 ${Math.round(H*p.line2SizeRatio)}px "${p.fontMediumFamily}", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
-          ctx.fillText(p.title2, centerX, baseY + Math.round(H*0.02));
-          ctx.restore();
-        }
-
-        // Logo fades in while lines fade out, then holds, then fades out (optional)
+        // --- Logo fades after credits start to fade ---
         let logoAlpha = 0;
         if (p.logoURL){
           if (now <= tHoldEnd){
-            // pre-fade-in period: keep 0
             logoAlpha = 0;
           } else if (now <= tLogoInEnd){
-            logoAlpha = clamp01((now - tHoldEnd) / p.logoFadeInMs);
+            logoAlpha = clamp01((now - tHoldEnd) / Math.max(1, p.logoFadeInMs));
           } else if (now <= tLogoHoldEnd){
             logoAlpha = 1;
           } else {
-            // fade out
-            logoAlpha = 1 - clamp01((now - tLogoHoldEnd) / p.logoFadeOutMs);
+            logoAlpha = 1 - clamp01((now - tLogoHoldEnd) / Math.max(1, p.logoFadeOutMs));
           }
 
           if (logo && logoAlpha > 0){
@@ -180,7 +251,9 @@
             ctx.save();
             ctx.globalAlpha = logoAlpha;
             ctx.imageSmoothingEnabled = true;
-            ctx.drawImage(logo, centerX - dw/2, logoY - dh/2, dw, dh);
+            // place the logo slightly above center to balance after credits disappear
+            const cx = Math.round(W/2), cy = Math.round(H*0.52);
+            ctx.drawImage(logo, cx - dw/2, cy - dh/2, dw, dh);
             ctx.restore();
           }
         }

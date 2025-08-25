@@ -25,7 +25,7 @@
     textScale: 0.82,            // fraction of tile size -> font px
 
     // OPTIONAL: per‑row absolute font size in px (one entry per title line); null to disable
-    fontPxByRow: [32, 36, null, 22, 22, null, 22, 22],
+    fontPxByRow: [36, 42, null, 25, 25, null, 25, 25],
 
     // --- content & layout for TITLE TYPING (unchanged) ---
     titleLines: [
@@ -152,7 +152,7 @@
   }
 
   function computeTile() {
-    const BASE = 44;
+    const BASE = 35;
     const W = window.innerWidth, H = window.innerHeight;
     const tCols = Math.floor(W / BASE), tRows = Math.floor(H / BASE);
     const tile = Math.max(1, Math.min(tCols, tRows));
